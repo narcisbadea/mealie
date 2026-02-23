@@ -194,10 +194,14 @@ class OpenAIService(BaseService):
 
     async def _get_raw_response(self, messages: list[dict], response_schema: type[T]) -> ChatCompletion:
         client = self.get_client()
-        return await client.chat.completions.parse(
+        # Add JSON instruction to the system prompt if not present
+        if messages and messages[0].get("role") == "system":
+            messages[0]["content"] += "\n\nYou MUST return your answer in strictly valid JSON format that matches the required schema."
+            
+        return await client.chat.completions.create(
             messages=messages,
             model=self.model,
-            response_format=response_schema,
+            response_format={"type": "json_object"},
         )
 
     async def get_response(

@@ -245,7 +245,10 @@ class RecipeController(BaseRecipeController):
                 detail=ErrorResponse.respond("OpenAI image services are not enabled"),
             )
 
-        recipe = await self.service.create_from_images(images, translate_language)
+        try:
+            recipe = await self.service.create_from_images(images, translate_language)
+        except (ValueError, Exception) as e:
+            raise HTTPException(status_code=400, detail=ErrorResponse.respond(str(e)))
         self.publish_event(
             event_type=EventTypes.recipe_created,
             document_data=EventRecipeData(operation=EventOperation.create, recipe_slug=recipe.slug),
@@ -265,7 +268,10 @@ class RecipeController(BaseRecipeController):
                 detail=ErrorResponse.respond("OpenAI is not enabled"),
             )
 
-        recipe = await self.service.create_from_text(req.text)
+        try:
+            recipe = await self.service.create_from_text(req.text)
+        except (ValueError, Exception) as e:
+            raise HTTPException(status_code=400, detail=ErrorResponse.respond(str(e)))
         self.publish_event(
             event_type=EventTypes.recipe_created,
             document_data=EventRecipeData(operation=EventOperation.create, recipe_slug=recipe.slug),
@@ -287,7 +293,7 @@ class RecipeController(BaseRecipeController):
 
         try:
             recipe = await self.service.create_from_youtube(req.url)
-        except ValueError as e:
+        except (ValueError, Exception) as e:
             raise HTTPException(status_code=400, detail=ErrorResponse.respond(str(e)))
 
         self.publish_event(

@@ -685,7 +685,7 @@ class OpenAIRecipeService(RecipeServiceBase):
             if not response:
                 raise ValueError("Received empty response from OpenAI")
         except Exception as e:
-            raise Exception("Failed to call OpenAI services") from e
+            raise Exception(f"Failed to call OpenAI services: {e}") from e
 
         try:
             recipe = self._convert_recipe(response)
