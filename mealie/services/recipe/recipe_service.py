@@ -630,13 +630,24 @@ class OpenAIRecipeService(RecipeServiceBase):
             if not (ingredient.food or ingredient.original_text or ingredient.title):
                 continue
 
+            food = ingredient.food
+            note = ingredient.note or ""
+
+            # Fallback: if food is empty but note or original_text has content,
+            # use that as the food name (common with video transcript parsing)
+            if not food and note:
+                food = note
+                note = ""
+            elif not food and ingredient.original_text:
+                food = ingredient.original_text
+
             recipe_ingredients.append(
                 RecipeIngredient(
                     title=ingredient.title,
                     quantity=ingredient.quantity,
                     unit=ingredient.unit,
-                    food=ingredient.food,
-                    note=ingredient.note or "",
+                    food=food,
+                    note=note,
                     original_text=ingredient.original_text,
                 )
             )

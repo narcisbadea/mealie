@@ -1,20 +1,25 @@
 Extract recipe data from the provided freeform text and return it as a fully structured recipe.
 
+The text may come from various sources: a website, book, or a video transcript. Video transcripts contain conversational spoken text where ingredients and steps may be mentioned casually throughout. You must still extract and structure the recipe data from such text.
+
 Do not create or make up any information. If insufficient data is found, return only the fields you can confidently extract.
 
-You will receive the full text of a recipe, which may have been copied from a website, book, or other source. It may include a title, description, ingredients, instructions, notes, and other recipe data in any format.
-
-Extract the recipe name, description, yield, times, ingredients, instructions, notes/tips, and nutritional information. Preserve the original order of ingredients and instructions.
+Extract the recipe name, description, yield, times, ingredients, instructions, notes/tips, and nutritional information. Preserve the original order of ingredients and instructions. The recipe text may be in any language — preserve the original language in all extracted fields.
 
 IMPORTANT for time fields (total_time, prep_time, perform_time): Always return times in plain human-readable text like "30 minutes", "1 hour 30 minutes", "2 hours". Do NOT use ISO 8601 duration format (e.g., do NOT return "PT30M" or "55M"). If the source uses ISO format, convert it to readable text.
 
-IMPORTANT for ingredients: Parse each ingredient into its structured components:
-- quantity: The numeric amount as a number (e.g., 2, 0.5, 1.5). Use null if no quantity is specified.
-- unit: The unit of measurement as a string (e.g., "cup", "tbsp", "g", "ml", "pound"). Use null if no unit.
-- food: The food item name (e.g., "flour", "onion", "chicken breast"). This should be the core ingredient without preparation notes.
-- note: Any additional information like preparation method ("chopped", "minced"), temperature ("room temperature"), or other qualifiers ("to taste", "divided"). Use null if none.
-- original_text: The complete original ingredient text exactly as it appears in the recipe (e.g., "1 cup all-purpose flour, sifted").
+IMPORTANT for ingredients: Parse each ingredient into its structured components. The "food" field is the MOST IMPORTANT field and must ALWAYS be set for every ingredient:
+- food: REQUIRED for every ingredient. The food item name (e.g., "flour", "onion", "chicken breast", "biscuiți Biscoff"). This must always be populated — never leave it null if an ingredient is present. If the text mentions a food item without quantity or unit, still set the food name.
+- quantity: The numeric amount as a number (e.g., 2, 0.5, 1.5). Use null if no quantity is specified. When the text says vague amounts like "some" or "a little", use null.
+- unit: The unit of measurement as a string (e.g., "cup", "tbsp", "g", "ml", "lingură", "cană"). Use null if no unit. Keep units in the original language.
+- note: ONLY for preparation details ("chopped", "minced", "room temperature", "to taste", "melted"). Do NOT put the ingredient name here. Use null if no preparation note.
+- original_text: The complete original ingredient text as closely as possible to how it appears in the source.
 - title: Only set this for section headers (e.g., "For the sauce"). When a title is set, the other fields can be null if the title line has no ingredient.
+
+Common mistakes to avoid:
+- Do NOT put the ingredient name in the "note" field. The name goes in "food".
+- Do NOT leave "food" as null while putting the ingredient text in "note" or "original_text".
+- If an ingredient has no clear quantity (e.g., "Biscoff cookies", "Greek yogurt"), set quantity to null and unit to null, but ALWAYS set the food name.
 
 IMPORTANT for nutrition: Extract nutritional values as plain numbers without units in the value string:
 - calories: Just the number, e.g. "350" (not "350 kcal")
