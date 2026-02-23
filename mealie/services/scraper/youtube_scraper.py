@@ -29,12 +29,27 @@ async def get_video_metadata(url: str) -> dict[str, Any]:
 
 
 def _fetch_transcript_sync(video_id: str) -> str | None:
-    """Synchronous transcript fetch — intended for use inside an executor."""
+    """Synchronous transcript fetch — intended for use inside an executor.
+
+    Tries manually-created transcripts first, then auto-generated ones,
+    accepting any available language (not limited to English).
+    """
     try:
         from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore[import-untyped]
 
         api = YouTubeTranscriptApi()
-        fetched = api.fetch(video_id)
+        transcript_list = api.list(video_id)
+
+        # Prefer manually-created transcripts; fall back to auto-generated
+        transcript = None
+        for t in transcript_list:
+            if not t.is_generated:
+                transcript = t
+                break
+        if transcript is None:
+            transcript = next(iter(transcript_list))
+
+        fetched = transcript.fetch()
         return " ".join(snippet.text for snippet in fetched)
     except Exception:
         return None
