@@ -43,7 +43,7 @@
             color="gray"
             secondary
             target="_blank"
-            href="https://github.com/mealie-recipes/mealie/issues/new/choose"
+            href="https://github.com/narcisbadea/mealie/issues/new/choose"
           >
             <template #icon>
               {{ $globals.icons.github }}
@@ -188,7 +188,7 @@
                 <v-list-item-subtitle>
                   <a
                     target="_blank"
-                    :href="`https://github.com/mealie-recipes/mealie/commit/${property.value}`"
+                    :href="`https://github.com/narcisbadea/mealie/commit/${property.value}`"
                   >
                     {{ property.value }}
                   </a>
@@ -198,7 +198,7 @@
                 <v-list-item-subtitle>
                   <a
                     target="_blank"
-                    :href="`https://github.com/mealie-recipes/mealie/releases/tag/${property.value}`"
+                    :href="`https://github.com/narcisbadea/mealie/releases/tag/${property.value}`"
                   >
                     {{ property.value }}
                   </a>
