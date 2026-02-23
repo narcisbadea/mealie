@@ -38,3 +38,7 @@ class ScrapeRecipeData(ScrapeRecipeBase):
 
 class ScrapeRecipeText(MealieModel):
     text: str
+
+
+class ScrapeRecipeYouTube(MealieModel):
+    url: str

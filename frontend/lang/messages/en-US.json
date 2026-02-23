@@ -719,7 +719,13 @@
     "ai-tab-photo": "Photo",
     "ai-text-placeholder": "Paste the full recipe text here (title, ingredients, instructions, etc.)",
     "ai-text-description": "Paste recipe text from any source. AI will extract the recipe and create structured ingredients, instructions, and more.",
-    "ai-please-wait-text-processing": "Please wait, the text is being processed. This may take some time."
+    "ai-please-wait-text-processing": "Please wait, the text is being processed. This may take some time.",
+    "ai-tab-youtube": "YouTube",
+    "ai-youtube-description": "Paste a YouTube cooking video URL. AI will extract the recipe from the video transcript.",
+    "ai-youtube-url-label": "YouTube Video URL",
+    "ai-youtube-url-hint": "e.g. https://www.youtube.com/watch?v=...",
+    "ai-youtube-preview-title": "Video Preview",
+    "ai-please-wait-youtube-processing": "Please wait, the video transcript is being processed..."
   },
   "recipe-finder": {
     "recipe-finder": "Recipe Finder",

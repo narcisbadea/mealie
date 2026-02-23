@@ -38,7 +38,7 @@ from mealie.schema.recipe.recipe import (
     RecipeSummary,
 )
 from mealie.schema.recipe.recipe_asset import RecipeAsset
-from mealie.schema.recipe.recipe_scraper import ScrapeRecipeTest
+from mealie.schema.recipe.recipe_scraper import ScrapeRecipeTest, ScrapeRecipeYouTube
 from mealie.schema.recipe.recipe_suggestion import RecipeSuggestionQuery, RecipeSuggestionResponse
 from mealie.schema.recipe.request_helpers import (
     RecipeDuplicate,
@@ -266,6 +266,30 @@ class RecipeController(BaseRecipeController):
             )
 
         recipe = await self.service.create_from_text(req.text)
+        self.publish_event(
+            event_type=EventTypes.recipe_created,
+            document_data=EventRecipeData(operation=EventOperation.create, recipe_slug=recipe.slug),
+            group_id=recipe.group_id,
+            household_id=recipe.household_id,
+        )
+
+        return recipe.slug
+
+    @router.post("/create/youtube", status_code=201)
+    async def create_recipe_from_youtube(self, req: ScrapeRecipeYouTube):
+        """Create a recipe from a YouTube video URL using OpenAI."""
+
+        if not self.settings.OPENAI_ENABLED:
+            raise HTTPException(
+                status_code=400,
+                detail=ErrorResponse.respond("OpenAI is not enabled"),
+            )
+
+        try:
+            recipe = await self.service.create_from_youtube(req.url)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=ErrorResponse.respond(str(e)))
+
         self.publish_event(
             event_type=EventTypes.recipe_created,
             document_data=EventRecipeData(operation=EventOperation.create, recipe_slug=recipe.slug),

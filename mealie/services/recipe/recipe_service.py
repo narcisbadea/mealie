@@ -359,6 +359,27 @@ class RecipeService(RecipeServiceBase):
         recipe = self.create_one(recipe_data)
         return recipe
 
+    async def create_from_youtube(self, url: str) -> Recipe:
+        from mealie.services.scraper.youtube_scraper import get_video_context
+
+        combined_text, thumbnail_url = await get_video_context(url)
+
+        openai_service = OpenAIRecipeService(self.repos, self.user, self.household, self.translator)
+        recipe_data = await openai_service.build_recipe_from_text(combined_text)
+        recipe_data = cleaner.clean(recipe_data, self.translator)
+        recipe = self.create_one(recipe_data)
+
+        if thumbnail_url and recipe.id:
+            try:
+                data_service = RecipeDataService(recipe.id)
+                await data_service.scrape_image(thumbnail_url)
+                recipe.image = cache.new_key(4)
+                self.group_recipes.update(recipe.slug, recipe)
+            except Exception:
+                self.logger.warning(f"Failed to download YouTube thumbnail for {recipe.slug}", exc_info=True)
+
+        return recipe
+
     async def create_from_images(self, images: list[UploadFile], translate_language: str | None = None) -> Recipe:
         openai_recipe_service = OpenAIRecipeService(self.repos, self.user, self.household, self.translator)
         with get_temporary_path() as temp_path:

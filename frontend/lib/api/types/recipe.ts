@@ -523,6 +523,9 @@ export interface ScrapeRecipeTest {
 export interface ScrapeRecipeText {
   text: string;
 }
+export interface ScrapeRecipeYouTube {
+  url: string;
+}
 export interface SlugResponse {}
 export interface TagIn {
   name: string;
