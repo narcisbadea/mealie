@@ -192,19 +192,10 @@ class OpenAIService(BaseService):
             )
         return "\n".join(content_parts)
 
-    async def _get_raw_response(self, prompt: str, content: list[dict], response_schema: type[T]) -> ChatCompletion:
+    async def _get_raw_response(self, messages: list[dict], response_schema: type[T]) -> ChatCompletion:
         client = self.get_client()
         return await client.chat.completions.parse(
-            messages=[
-                {
-                    "role": "system",
-                    "content": prompt,
-                },
-                {
-                    "role": "user",
-                    "content": content,
-                },
-            ],
+            messages=messages,
             model=self.model,
             response_format=response_schema,
         )
@@ -217,21 +208,63 @@ class OpenAIService(BaseService):
         response_schema: type[T],
         images: list[OpenAIImageBase] | None = None,
     ) -> T | None:
-        """Send data to OpenAI and return the response message content"""
+        """Send data to OpenAI and return the response message content.
+
+        On JSON parse failure, retries up to 2 times using a multi-turn
+        conversation that tells the model what went wrong.
+        """
         if images and not self.enable_image_services:
             self.logger.warning("OpenAI image services are disabled, ignoring images")
             images = None
 
-        try:
-            user_messages = [{"type": "text", "text": message}]
-            for image in images or []:
-                user_messages.append(image.build_message())
+        user_content: list[dict] = [{"type": "text", "text": message}]
+        for image in images or []:
+            user_content.append(image.build_message())
 
-            response = await self._get_raw_response(prompt, user_messages, response_schema)
+        messages: list[dict] = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_content},
+        ]
+
+        max_retries = 2
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                response = await self._get_raw_response(messages, response_schema)
+            except Exception as e:
+                raise Exception(f"OpenAI Request Failed. {e.__class__.__name__}: {e}") from e
+
             if not response.choices:
                 return None
 
-            response_text = response.choices[0].message.content
-            return response_schema.parse_openai_response(response_text)
-        except Exception as e:
-            raise Exception(f"OpenAI Request Failed. {e.__class__.__name__}: {e}") from e
+            choice = response.choices[0].message
+
+            # Use .parsed directly when structured outputs succeed
+            if hasattr(choice, "parsed") and choice.parsed is not None:
+                return choice.parsed  # type: ignore[return-value]
+
+            response_text = choice.content
+            try:
+                return response_schema.parse_openai_response(response_text)
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    self.logger.warning(
+                        f"OpenAI response parse failed (attempt {attempt + 1}/{max_retries + 1}): {e}. Retrying with correction..."
+                    )
+                    messages.append({"role": "assistant", "content": response_text or ""})
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your previous response could not be parsed as valid JSON matching the required schema. "
+                                f"Parse error: {e}. "
+                                "Please return a valid JSON response that exactly matches the required schema."
+                            ),
+                        }
+                    )
+
+        raise Exception(
+            f"OpenAI Request Failed. Response could not be parsed after {max_retries + 1} attempts: {last_error}"
+        ) from last_error

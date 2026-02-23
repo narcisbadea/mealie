@@ -31,7 +31,14 @@
       "Bash(ls:*)",
       "Bash(git remote set-url:*)",
       "Bash(git checkout:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(cd:*)",
+      "Bash(cd /c/Environments/pw/mealie && python -c \"\nfrom youtube_transcript_api import YouTubeTranscriptApi\n\nvideo_id = 'GoNDvwneVVQ'\napi = YouTubeTranscriptApi\\(\\)\n\nprint\\('Listing transcripts...'\\)\ntry:\n    transcript_list = api.list\\(video_id\\)\n    print\\(f'Found transcripts:'\\)\n    for t in transcript_list:\n        print\\(f'  - language={t.language}, code={t.language_code}, is_generated={t.is_generated}'\\)\nexcept Exception as e:\n    print\\(f'ERROR listing: {type\\(e\\).__name__}: {e}'\\)\n\nprint\\(\\)\nprint\\('Trying to fetch directly...'\\)\ntry:\n    fetched = api.fetch\\(video_id\\)\n    text = ' '.join\\(s.text for s in fetched\\)\n    print\\(f'Direct fetch SUCCESS: {len\\(text\\)} chars'\\)\n    print\\(text[:500]\\)\nexcept Exception as e:\n    print\\(f'ERROR fetching: {type\\(e\\).__name__}: {e}'\\)\n\" 2>&1)",
+      "Bash(cd /c/Environments/pw/mealie && uv run python -c \"\nfrom youtube_transcript_api import YouTubeTranscriptApi\n\nvideo_id = 'GoNDvwneVVQ'\napi = YouTubeTranscriptApi\\(\\)\n\nprint\\('Listing transcripts...'\\)\ntry:\n    transcript_list = api.list\\(video_id\\)\n    print\\('Found transcripts:'\\)\n    for t in transcript_list:\n        print\\(f'  - language={t.language}, code={t.language_code}, is_generated={t.is_generated}'\\)\nexcept Exception as e:\n    print\\(f'ERROR listing: {type\\(e\\).__name__}: {e}'\\)\n\nprint\\(\\)\nprint\\('Trying to fetch directly...'\\)\ntry:\n    fetched = api.fetch\\(video_id\\)\n    text = ' '.join\\(s.text for s in fetched\\)\n    print\\(f'Direct fetch SUCCESS: {len\\(text\\)} chars'\\)\n    print\\(text[:500]\\)\nexcept Exception as e:\n    print\\(f'ERROR fetching: {type\\(e\\).__name__}: {e}'\\)\n\" 2>&1)",
+      "Bash(cd /c/Environments/pw/mealie && .venv/Scripts/python -c \"\nfrom youtube_transcript_api import YouTubeTranscriptApi\n\nvideo_id = 'GoNDvwneVVQ'\napi = YouTubeTranscriptApi\\(\\)\n\nprint\\('Listing transcripts...'\\)\ntry:\n    transcript_list = api.list\\(video_id\\)\n    print\\('Found transcripts:'\\)\n    for t in transcript_list:\n        print\\(f'  - language={t.language}, code={t.language_code}, is_generated={t.is_generated}'\\)\nexcept Exception as e:\n    print\\(f'ERROR listing: {type\\(e\\).__name__}: {e}'\\)\n\" 2>&1)",
+      "Bash(grep:*)",
+      "Bash(tail:*)",
+      "Bash(/tmp/debug-venv/bin/python:*)"
     ]
   }
 }
