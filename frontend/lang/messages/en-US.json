@@ -725,7 +725,13 @@
     "ai-youtube-url-label": "YouTube Video URL",
     "ai-youtube-url-hint": "e.g. https://www.youtube.com/watch?v=...",
     "ai-youtube-preview-title": "Video Preview",
-    "ai-please-wait-youtube-processing": "Please wait, the video transcript is being processed..."
+    "ai-please-wait-youtube-processing": "Please wait, the video transcript is being processed...",
+    "ai-tab-tiktok": "TikTok",
+    "ai-tiktok-description": "Paste a TikTok cooking video URL. AI will extract recipe context from captions and metadata.",
+    "ai-tiktok-url-label": "TikTok Video URL",
+    "ai-tiktok-url-hint": "e.g. https://www.tiktok.com/@creator/video/...",
+    "ai-tiktok-preview-title": "Video Preview",
+    "ai-please-wait-tiktok-processing": "Please wait, the TikTok video is being processed..."
   },
   "recipe-finder": {
     "recipe-finder": "Recipe Finder",

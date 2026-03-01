@@ -194,9 +194,7 @@ class RecipeService(RecipeServiceBase):
         for ingredient in recipe.recipe_ingredient:
             # Resolve food
             if ingredient.food and ingredient.food.name:
-                existing = self.repos.ingredient_foods.get_one(
-                    ingredient.food.name, key="name", any_case=True
-                )
+                existing = self.repos.ingredient_foods.get_one(ingredient.food.name, key="name", any_case=True)
                 if existing:
                     ingredient.food = existing
                 else:
@@ -207,9 +205,7 @@ class RecipeService(RecipeServiceBase):
 
             # Resolve unit
             if ingredient.unit and ingredient.unit.name:
-                existing = self.repos.ingredient_units.get_one(
-                    ingredient.unit.name, key="name", any_case=True
-                )
+                existing = self.repos.ingredient_units.get_one(ingredient.unit.name, key="name", any_case=True)
                 if existing:
                     ingredient.unit = existing
                 else:
@@ -377,6 +373,27 @@ class RecipeService(RecipeServiceBase):
                 self.group_recipes.update(recipe.slug, recipe)
             except Exception:
                 self.logger.warning(f"Failed to download YouTube thumbnail for {recipe.slug}", exc_info=True)
+
+        return recipe
+
+    async def create_from_tiktok(self, url: str) -> Recipe:
+        from mealie.services.scraper.tiktok_scraper import get_video_context
+
+        combined_text, thumbnail_url = await get_video_context(url)
+
+        openai_service = OpenAIRecipeService(self.repos, self.user, self.household, self.translator)
+        recipe_data = await openai_service.build_recipe_from_text(combined_text)
+        recipe_data = cleaner.clean(recipe_data, self.translator)
+        recipe = self.create_one(recipe_data)
+
+        if thumbnail_url and recipe.id:
+            try:
+                data_service = RecipeDataService(recipe.id)
+                await data_service.scrape_image(thumbnail_url)
+                recipe.image = cache.new_key(4)
+                self.group_recipes.update(recipe.slug, recipe)
+            except Exception:
+                self.logger.warning(f"Failed to download TikTok thumbnail for {recipe.slug}", exc_info=True)
 
         return recipe
 

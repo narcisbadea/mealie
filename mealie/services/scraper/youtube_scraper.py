@@ -4,9 +4,10 @@ from typing import Any
 
 import httpx
 
-_VIDEO_ID_RE = re.compile(
-    r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})"
-)
+_TRANSCRIPT_TIMEOUT_SECONDS = 20
+_MAX_TRANSCRIPT_CHARS = 12000
+
+_VIDEO_ID_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
 
 
 def extract_video_id(url: str) -> str | None:
@@ -57,8 +58,19 @@ def _fetch_transcript_sync(video_id: str) -> str | None:
 
 async def get_transcript(video_id: str) -> str | None:
     """Fetch and join all transcript segments for a YouTube video (async wrapper)."""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _fetch_transcript_sync, video_id)
+    loop = asyncio.get_running_loop()
+    try:
+        transcript = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_transcript_sync, video_id),
+            timeout=_TRANSCRIPT_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        return None
+
+    if not transcript:
+        return None
+
+    return transcript[:_MAX_TRANSCRIPT_CHARS]
 
 
 async def get_video_context(url: str) -> tuple[str, str | None]:
@@ -78,13 +90,15 @@ async def get_video_context(url: str) -> tuple[str, str | None]:
     metadata_task = asyncio.create_task(get_video_metadata(url))
     transcript_task = asyncio.create_task(get_transcript(video_id))
 
-    metadata = await metadata_task
+    try:
+        metadata = await metadata_task
+    except Exception:
+        metadata = {}
+
     transcript = await transcript_task
 
     if not transcript:
-        raise ValueError(
-            "No transcript found for this video. Please try a video with captions enabled."
-        )
+        raise ValueError("No transcript found for this video. Please try a video with captions enabled.")
 
     title = metadata.get("title", "")
     thumbnail_url = metadata.get("thumbnail_url")

@@ -42,3 +42,7 @@ class ScrapeRecipeText(MealieModel):
 
 class ScrapeRecipeYouTube(MealieModel):
     url: str
+
+
+class ScrapeRecipeTikTok(MealieModel):
+    url: str

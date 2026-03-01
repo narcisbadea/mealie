@@ -14,14 +14,17 @@
       <v-tab value="text">
         {{ $t("recipe.ai-tab-text") }}
       </v-tab>
+      <v-tab value="youtube">
+        {{ $t("recipe.ai-tab-youtube") }}
+      </v-tab>
+      <v-tab value="tiktok">
+        {{ $t("recipe.ai-tab-tiktok") }}
+      </v-tab>
       <v-tab
         v-if="$appInfo.enableOpenaiImageServices"
         value="photo"
       >
         {{ $t("recipe.ai-tab-photo") }}
-      </v-tab>
-      <v-tab value="youtube">
-        {{ $t("recipe.ai-tab-youtube") }}
       </v-tab>
     </v-tabs>
 
@@ -263,6 +266,97 @@
         </v-expand-transition>
       </v-tabs-window-item>
 
+      <!-- TikTok Tab -->
+      <v-tabs-window-item value="tiktok">
+        <v-form
+          ref="domTiktokForm"
+          class="mt-4"
+          @submit.prevent="createFromTiktok"
+        >
+          <p class="mb-3">
+            {{ $t("recipe.ai-tiktok-description") }}
+          </p>
+          <v-text-field
+            v-model="tiktokUrl"
+            :label="$t('recipe.ai-tiktok-url-label')"
+            :prepend-inner-icon="$globals.icons.link"
+            validate-on="blur"
+            variant="solo-filled"
+            clearable
+            class="rounded-lg mt-2"
+            rounded
+            :rules="[tiktokUrlValidator]"
+            :hint="$t('recipe.ai-tiktok-url-hint')"
+            persistent-hint
+            @blur="fetchTiktokPreview"
+          />
+          <v-card
+            v-if="tiktokThumbnail"
+            class="mt-4"
+            variant="outlined"
+          >
+            <v-card-title class="text-subtitle-2">
+              {{ $t("recipe.ai-tiktok-preview-title") }}
+            </v-card-title>
+            <v-img
+              :src="tiktokThumbnail"
+              :alt="tiktokTitle ?? ''"
+              max-height="200"
+              cover
+            />
+            <v-card-text v-if="tiktokTitle" class="text-body-2 pt-2">
+              {{ tiktokTitle }}
+            </v-card-text>
+          </v-card>
+          <v-checkbox
+            v-model="stayInEditMode"
+            color="primary"
+            hide-details
+            :label="$t('recipe.stay-in-edit-mode')"
+          />
+          <v-checkbox
+            v-model="parseRecipe"
+            color="primary"
+            hide-details
+            :label="$t('recipe.parse-recipe-ingredients-after-import')"
+          />
+          <v-card-actions class="justify-center">
+            <div style="width: 250px">
+              <BaseButton
+                :disabled="!tiktokUrl || tiktokUrl === ''"
+                rounded
+                block
+                type="submit"
+                :loading="tiktokLoading"
+              />
+            </div>
+          </v-card-actions>
+          <p v-if="tiktokLoading" class="text-center mb-0">
+            {{ $t("recipe.ai-please-wait-tiktok-processing") }}
+          </p>
+        </v-form>
+        <v-expand-transition>
+          <v-alert
+            v-if="tiktokError"
+            color="error"
+            class="mt-6 white--text"
+          >
+            <v-card-title class="ma-0 pa-0">
+              <v-icon
+                start
+                color="white"
+                size="x-large"
+              >
+                {{ $globals.icons.robot }}
+              </v-icon>
+              {{ $t("new-recipe.error-title") }}
+            </v-card-title>
+            <v-divider class="my-3 mx-2" />
+            <p>{{ tiktokErrorMessage ?? $t("new-recipe.error-details") }}</p>
+          </v-alert>
+        </v-expand-transition>
+      </v-tabs-window-item>
+
       <!-- Photo Tab -->
       <v-tabs-window-item
         v-if="$appInfo.enableOpenaiImageServices"
@@ -453,6 +547,53 @@ export default defineNuxtComponent({
       navigateToRecipe(data, groupSlug.value, createPagePath.value);
     }
 
+    // TikTok tab state
+    const tiktokUrl = ref<string | null>(null);
+    const tiktokLoading = ref(false);
+    const tiktokError = ref(false);
+    const tiktokErrorMessage = ref<string | null>(null);
+    const tiktokThumbnail = ref<string | null>(null);
+    const tiktokTitle = ref<string | null>(null);
+    const domTiktokForm = ref<VForm | null>(null);
+
+    function tiktokUrlValidator(v: string) {
+      return /^https?:\/\/(www\.)?(tiktok\.com\/|vm\.tiktok\.com\/|vt\.tiktok\.com\/)/.test(v) || "Please enter a valid TikTok URL";
+    }
+
+    async function fetchTiktokPreview() {
+      if (!tiktokUrl.value) return;
+      try {
+        const res = await fetch(
+          `https://www.tiktok.com/oembed?url=${encodeURIComponent(tiktokUrl.value)}`,
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        tiktokThumbnail.value = data.thumbnail_url ?? null;
+        tiktokTitle.value = data.title ?? null;
+      } catch {
+        // Non-critical — silently ignore
+      }
+    }
+
+    async function createFromTiktok() {
+      if (!tiktokUrl.value) return;
+
+      tiktokLoading.value = true;
+      tiktokError.value = false;
+      tiktokErrorMessage.value = null;
+
+      const { data, error } = await api.recipes.createOneFromTiktok(tiktokUrl.value);
+
+      if (error || !data) {
+        tiktokError.value = true;
+        tiktokErrorMessage.value = (error as any)?.response?.data?.detail?.message ?? null;
+        tiktokLoading.value = false;
+        return;
+      }
+
+      navigateToRecipe(data, groupSlug.value, createPagePath.value);
+    }
+
     // Photo tab state
     const photoLoading = ref(false);
     const domPhotoForm = ref<VForm | null>(null);
@@ -602,6 +743,17 @@ export default defineNuxtComponent({
       youtubeUrlValidator,
       fetchYoutubePreview,
       createFromYoutube,
+      // TikTok tab
+      tiktokUrl,
+      tiktokLoading,
+      tiktokError,
+      tiktokErrorMessage,
+      tiktokThumbnail,
+      tiktokTitle,
+      domTiktokForm,
+      tiktokUrlValidator,
+      fetchTiktokPreview,
+      createFromTiktok,
       // Photo tab
       photoLoading,
       domPhotoForm,

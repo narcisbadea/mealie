@@ -40,6 +40,7 @@ const routes = {
   recipesCreateFromImage: `${prefix}/recipes/create/image`,
   recipesCreateFromText: `${prefix}/recipes/create/text`,
   recipesCreateFromYoutube: `${prefix}/recipes/create/youtube`,
+  recipesCreateFromTiktok: `${prefix}/recipes/create/tiktok`,
   recipesCreateFromHtmlOrJson: `${prefix}/recipes/create/html-or-json`,
   recipesCategory: `${prefix}/recipes/category`,
   recipesParseIngredient: `${prefix}/parser/ingredient`,
@@ -166,6 +167,10 @@ export class RecipeAPI extends BaseCRUDAPI<CreateRecipe, Recipe, Recipe> {
 
   async createOneFromYoutube(url: string) {
     return await this.requests.post<string>(routes.recipesCreateFromYoutube, { url });
+  }
+
+  async createOneFromTiktok(url: string) {
+    return await this.requests.post<string>(routes.recipesCreateFromTiktok, { url });
   }
 
   async createOneFromImages(fileObjects: (Blob | File)[], translateLanguage: string | null = null) {
