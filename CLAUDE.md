@@ -99,3 +99,25 @@ frontend/
 - `frontend/lib/api/base/base-clients.ts` — API client base classes
 - `tests/conftest.py` — test fixtures and setup
 - `dev/code-generation/main.py` — code generation entry point
+
+## Repository & GitHub CLI
+
+- **Upstream:** `https://github.com/mealie/mealie` — original repository
+- **Fork:** `https://github.com/narcisbadea/mealie` — personal fork (origin remote)
+- **PRs should target** the fork's `main` branch, not upstream
+
+### Creating PRs with gh CLI
+
+```bash
+# Push branch first
+git push -u origin <branch-name>
+
+# Create PR (must specify repo explicitly for forks)
+gh pr create --repo narcisbadea/mealie --base main --head <branch-name> --title "..." --body "..."
+```
+
+### Common gh CLI Issues
+
+- `No commits between main and <branch>` — branch not pushed to remote; run `git push -u origin <branch>`
+- `Head sha can't be blank` — same issue; ensure branch exists on remote
+- Always use `--repo narcisbadea/mealie` when creating PRs to avoid confusion with upstream
