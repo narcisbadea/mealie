@@ -301,6 +301,11 @@ class RecipeController(BaseRecipeController):
             document_data=EventRecipeData(operation=EventOperation.create, recipe_slug=recipe.slug),
             group_id=recipe.group_id,
             household_id=recipe.household_id,
+            message=self.t(
+                "notifications.generic-created-with-url",
+                name=recipe.name,
+                url=urls.recipe_url(self.group.slug, recipe.slug, self.settings.BASE_URL),
+            ),
         )
 
         return recipe.slug
@@ -325,6 +330,11 @@ class RecipeController(BaseRecipeController):
             document_data=EventRecipeData(operation=EventOperation.create, recipe_slug=recipe.slug),
             group_id=recipe.group_id,
             household_id=recipe.household_id,
+            message=self.t(
+                "notifications.generic-created-with-url",
+                name=recipe.name,
+                url=urls.recipe_url(self.group.slug, recipe.slug, self.settings.BASE_URL),
+            ),
         )
 
         return recipe.slug
