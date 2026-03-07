@@ -1,11 +1,16 @@
 import asyncio
 import json
+import logging
 import re
 from collections.abc import Iterable
 from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
+
+from mealie.pkgs.safehttp import AsyncSafeTransport
+
+logger = logging.getLogger(__name__)
 
 _TIKTOK_URL_RE = re.compile(
     r"^https?://(?:www\.)?(?:tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com|m\.tiktok\.com)/",
@@ -226,7 +231,9 @@ async def _fetch_video_page_context(url: str) -> tuple[list[str], list[str], str
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
         )
     }
-    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=headers) as client:
+    async with httpx.AsyncClient(
+        timeout=12.0, follow_redirects=True, headers=headers, transport=AsyncSafeTransport()
+    ) as client:
         response = await client.get(url)
         response.raise_for_status()
         return extract_context_from_html(response.text)
@@ -236,7 +243,9 @@ async def _fetch_first_subtitle(subtitle_urls: list[str]) -> str | None:
     if not subtitle_urls:
         return None
 
-    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        timeout=12.0, follow_redirects=True, transport=AsyncSafeTransport()
+    ) as client:
         for subtitle_url in subtitle_urls[:3]:
             try:
                 response = await client.get(subtitle_url)
@@ -252,7 +261,7 @@ async def _fetch_first_subtitle(subtitle_urls: list[str]) -> str | None:
 
 async def get_video_metadata(url: str) -> dict[str, Any]:
     oembed_url = f"https://www.tiktok.com/oembed?url={url}"
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, transport=AsyncSafeTransport()) as client:
         response = await client.get(oembed_url)
         response.raise_for_status()
         data = response.json()
@@ -272,7 +281,8 @@ async def get_video_context(url: str) -> tuple[str, str | None]:
     metadata: dict[str, Any] = {}
     try:
         metadata = await metadata_task
-    except Exception:
+    except Exception as e:
+        logger.debug("TikTok oEmbed API failed: %s", e)
         metadata = {}
 
     text_candidates: list[str] = []

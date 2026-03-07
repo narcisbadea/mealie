@@ -165,5 +165,5 @@ class RecipeDataService(BaseService):
                 raise NotAnImageError(f"Content-Type {content_type} is not an image")
 
             self.logger.debug(f"File Name Suffix {file_path.suffix}")
-            self.write_image(r.read(), file_path.suffix)
+            self.write_image(r.content, file_path.suffix)
             file_path.unlink(missing_ok=True)
