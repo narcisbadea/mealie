@@ -16,6 +16,7 @@
         v-model="tiktokUrl"
         label="TikTok Video URL"
         :prepend-inner-icon="$globals.icons.link"
+        :rules="[tiktokUrlValidator]"
         validate-on="blur"
         variant="solo-filled"
         clearable
@@ -114,6 +115,12 @@ export default defineNuxtComponent({
 
     const createPagePath = computed(() => `/g/${groupSlug.value}/r/create/tiktok`);
 
+    function tiktokUrlValidator(v: string | null): boolean | string {
+      if (!v) return true; // Required handled separately
+      const pattern = /^https?:\/\/(www\.)?(tiktok\.com\/|vm\.tiktok\.com\/|vt\.tiktok\.com\/|m\.tiktok\.com\/)/i;
+      return pattern.test(v) || "Please enter a valid TikTok URL";
+    }
+
     async function fetchTiktokPreview() {
       if (!tiktokUrl.value) {
         return;
@@ -171,6 +178,7 @@ export default defineNuxtComponent({
       parseRecipe,
       fetchTiktokPreview,
       createFromTiktok,
+      tiktokUrlValidator,
     };
   },
 });
