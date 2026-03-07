@@ -12,7 +12,7 @@
     </v-container>
     <v-form
       ref="uploadForm"
-      @submit.prevent="testOpenAI"
+      @submit.prevent="testAI"
     >
       <div>
         <v-card-text>
@@ -121,15 +121,15 @@ export default defineNuxtComponent({
       uploadedImagePreviewUrl.value = undefined;
     }
 
-    async function testOpenAI() {
+    async function testAI() {
       response.value = "";
 
       loading.value = true;
-      const { data } = await api.debug.debugOpenAI(uploadedImage.value);
+      const { data } = await api.debug.debugAI(uploadedImage.value);
       loading.value = false;
 
       if (!data) {
-        alert.error("Unable to test OpenAI services");
+        alert.error("Unable to test AI services");
       }
       else {
         response.value = data.response || (data.success ? "Test Successful" : "Test Failed");
@@ -144,7 +144,7 @@ export default defineNuxtComponent({
       uploadedImagePreviewUrl,
       uploadImage,
       clearImage,
-      testOpenAI,
+      testAI,
     };
   },
 });

@@ -100,7 +100,7 @@ const developerLinks: SidebarLinks = [
     children: [
       {
         icon: $globals.icons.robot,
-        to: "/admin/debug/openai",
+        to: "/admin/debug/ai",
         title: i18n.t("admin.openai"),
         restricted: true,
       },

@@ -15,13 +15,12 @@ router = APIRouter(prefix="/debug")
 @controller(router)
 class AdminDebugController(BaseAdminController):
     @router.post("/openai", response_model=DebugResponse)
+    @router.post("/ai", response_model=DebugResponse, include_in_schema=False)
     async def debug_openai(self, image: UploadFile | None = File(None)):
         if not self.settings.OPENAI_ENABLED:
-            return DebugResponse(success=False, response="OpenAI is not enabled")
+            return DebugResponse(success=False, response="AI is not enabled")
         if image and not self.settings.OPENAI_ENABLE_IMAGE_SERVICES:
-            return DebugResponse(
-                success=False, response="Image was provided, but OpenAI image services are not enabled"
-            )
+            return DebugResponse(success=False, response="Image was provided, but AI image services are not enabled")
 
         with get_temporary_path() as temp_path:
             if image:
@@ -45,13 +44,13 @@ class AdminDebugController(BaseAdminController):
                 )
 
                 if not response:
-                    raise Exception("No response received from OpenAI")
+                    raise Exception("No response received from AI")
 
-                return DebugResponse(success=True, response=f'OpenAI is working. Response: "{response.text}"')
+                return DebugResponse(success=True, response=f'AI is working. Response: "{response.text}"')
 
             except Exception as e:
                 self.logger.exception(e)
                 return DebugResponse(
                     success=False,
-                    response=f'OpenAI request failed. Full error has been logged. {e.__class__.__name__}: "{e}"',
+                    response=f'AI request failed. Full error has been logged. {e.__class__.__name__}: "{e}"',
                 )
