@@ -44,6 +44,22 @@
           {{ tiktokTitle }}
         </v-card-text>
       </v-card>
+      <v-select
+        v-model="targetLanguage"
+        :items="languageOptions"
+        :label="$t('recipe.ai-target-language-label')"
+        :hint="$t('recipe.ai-target-language-hint')"
+        persistent-hint
+        clearable
+        class="mt-4"
+        variant="outlined"
+      />
+      <v-checkbox
+        v-model="correctGrammar"
+        color="primary"
+        hide-details
+        :label="$t('recipe.ai-correct-grammar-label')"
+      />
       <v-checkbox
         v-model="stayInEditMode"
         color="primary"
@@ -70,6 +86,27 @@
       <p v-if="tiktokLoading" class="text-center mb-0">
         Please wait, the TikTok video is being processed...
       </p>
+      <v-alert
+        v-if="importStarted"
+        color="info"
+        class="mt-4"
+        variant="tonal"
+      >
+        <v-card-title class="ma-0 pa-0">
+          <v-icon
+            start
+            size="x-large"
+          >
+            {{ $globals.icons.bell }}
+          </v-icon>
+          Import Started
+        </v-card-title>
+        <v-divider class="my-3 mx-2" />
+        <p>Your TikTok recipe import has started in the background.</p>
+        <p class="mb-0">
+          You will receive a notification when it's complete. You can navigate away from this page.
+        </p>
+      </v-alert>
     </v-form>
     <v-expand-transition>
       <v-alert
@@ -81,7 +118,9 @@
           Import Error
         </v-card-title>
         <v-divider class="my-3 mx-2" />
-        <p class="text-white">{{ tiktokErrorMessage || 'An error occurred during import.' }}</p>
+        <p class="text-white">
+          {{ tiktokErrorMessage || 'An error occurred during import.' }}
+        </p>
       </v-alert>
     </v-expand-transition>
   </div>
@@ -92,6 +131,26 @@ import { useUserApi } from "~/composables/api";
 import { useNewRecipeOptions } from "~/composables/use-new-recipe-options";
 import type { VForm } from "~/types/auto-forms";
 
+// Common languages for recipe translation
+const LANGUAGE_OPTIONS = [
+  { title: "English", value: "English" },
+  { title: "Romanian", value: "Romanian" },
+  { title: "French", value: "French" },
+  { title: "German", value: "German" },
+  { title: "Spanish", value: "Spanish" },
+  { title: "Italian", value: "Italian" },
+  { title: "Portuguese", value: "Portuguese" },
+  { title: "Dutch", value: "Dutch" },
+  { title: "Polish", value: "Polish" },
+  { title: "Russian", value: "Russian" },
+  { title: "Japanese", value: "Japanese" },
+  { title: "Chinese", value: "Chinese" },
+  { title: "Korean", value: "Korean" },
+  { title: "Turkish", value: "Turkish" },
+  { title: "Arabic", value: "Arabic" },
+  { title: "Hindi", value: "Hindi" },
+];
+
 export default defineNuxtComponent({
   setup() {
     definePageMeta({
@@ -99,11 +158,8 @@ export default defineNuxtComponent({
     });
 
     const api = useUserApi();
-    const route = useRoute();
-    const auth = useMealieAuth();
-    const groupSlug = computed(() => route.params.groupSlug as string || auth.user.value?.groupSlug || "");
 
-    const { stayInEditMode, parseRecipe, navigateToRecipe } = useNewRecipeOptions();
+    const { stayInEditMode, parseRecipe } = useNewRecipeOptions();
 
     const tiktokUrl = ref<string | null>(null);
     const tiktokLoading = ref(false);
@@ -112,8 +168,11 @@ export default defineNuxtComponent({
     const tiktokThumbnail = ref<string | null>(null);
     const tiktokTitle = ref<string | null>(null);
     const domTiktokForm = ref<VForm | null>(null);
+    const targetLanguage = ref<string | null>(null);
+    const correctGrammar = ref(true);
+    const importStarted = ref(false);
 
-    const createPagePath = computed(() => `/g/${groupSlug.value}/r/create/tiktok`);
+    const languageOptions = LANGUAGE_OPTIONS;
 
     function tiktokUrlValidator(v: string | null): boolean | string {
       if (!v) return true; // Required handled separately
@@ -134,7 +193,8 @@ export default defineNuxtComponent({
         const data = await res.json();
         tiktokThumbnail.value = data.thumbnail_url || null;
         tiktokTitle.value = data.title || null;
-      } catch (error) {
+      }
+      catch (error) {
         console.error("[TikTok] Error fetching preview:", error);
       }
     }
@@ -147,23 +207,24 @@ export default defineNuxtComponent({
       tiktokLoading.value = true;
       tiktokError.value = false;
       tiktokErrorMessage.value = null;
+      importStarted.value = false;
 
-      try {
-        const { data, error } = await api.recipes.createOneFromTiktok(tiktokUrl.value);
+      const { data, error } = await api.recipes.createOneFromTiktok(
+        tiktokUrl.value,
+        targetLanguage.value ?? undefined,
+        correctGrammar.value,
+      );
 
-        if (error || !data) {
-          tiktokError.value = true;
-          tiktokErrorMessage.value = (error as any)?.response?.data?.detail?.message || null;
-          tiktokLoading.value = false;
-          return;
-        }
+      tiktokLoading.value = false;
 
-        navigateToRecipe(data, groupSlug.value, createPagePath.value);
-      } catch (err) {
-        console.error("[TikTok] Unexpected error:", err);
+      if (error || !data) {
         tiktokError.value = true;
-        tiktokLoading.value = false;
+        tiktokErrorMessage.value = (error as any)?.response?.data?.detail?.message || null;
+        return;
       }
+
+      // Import started successfully - show info message
+      importStarted.value = true;
     }
 
     return {
@@ -176,6 +237,10 @@ export default defineNuxtComponent({
       domTiktokForm,
       stayInEditMode,
       parseRecipe,
+      targetLanguage,
+      correctGrammar,
+      languageOptions,
+      importStarted,
       fetchTiktokPreview,
       createFromTiktok,
       tiktokUrlValidator,

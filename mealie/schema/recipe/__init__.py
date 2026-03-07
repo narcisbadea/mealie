@@ -188,7 +188,7 @@ __all__ = [
     "ScrapeRecipeBase",
     "ScrapeRecipeData",
     "ScrapeRecipeTest",
-    "ScrapeRecipeTikTok",
     "ScrapeRecipeText",
+    "ScrapeRecipeTikTok",
     "ScrapeRecipeYouTube",
 ]

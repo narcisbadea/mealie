@@ -179,7 +179,7 @@ class UserOut(UserBase):
 
     @classmethod
     def loader_options(cls) -> list[LoaderOption]:
-        return [joinedload(User.group), joinedload(User.household), joinedload(User.tokens)]
+        return [joinedload(User.group), joinedload(User.household), joinedload(User.token)]
 
 
 class UserSummary(MealieModel):
@@ -229,7 +229,7 @@ class PrivateUser(UserOut):
 
     @classmethod
     def loader_options(cls) -> list[LoaderOption]:
-        return [joinedload(User.group), joinedload(User.household), joinedload(User.tokens)]
+        return [joinedload(User.group), joinedload(User.household), joinedload(User.token)]
 
 
 class UpdateGroup(GroupBase):
@@ -283,7 +283,7 @@ class GroupInDB(UpdateGroup):
             joinedload(Group.preferences),
             joinedload(Group.households),
             selectinload(Group.users).joinedload(User.group),
-            selectinload(Group.users).joinedload(User.tokens),
+            selectinload(Group.users).joinedload(User.token),
         ]
 
 

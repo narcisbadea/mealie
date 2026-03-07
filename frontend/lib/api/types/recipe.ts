@@ -523,8 +523,15 @@ export interface ScrapeRecipeTest {
 export interface ScrapeRecipeText {
   text: string;
 }
+export interface ScrapeRecipeTikTok {
+  url: string;
+  targetLanguage?: string | null;
+  correctGrammar?: boolean;
+}
 export interface ScrapeRecipeYouTube {
   url: string;
+  targetLanguage?: string | null;
+  correctGrammar?: boolean;
 }
 export interface SlugResponse {}
 export interface TagIn {

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from ..household.mealplan import GroupMealPlan
     from ..household.shopping_list import ShoppingList
     from ..recipe import RecipeComment, RecipeModel, RecipeTimelineEvent
+    from .in_app_notification import InAppNotificationModel
     from .password_reset import PasswordResetModel
 
 
@@ -80,10 +81,11 @@ class User(SqlAlchemyBase, BaseMixins):
         "single_parent": True,
     }
 
-    tokens: Mapped[list[LongLiveToken]] = orm.relationship(LongLiveToken, **sp_args)
+    token: Mapped[list[LongLiveToken]] = orm.relationship(LongLiveToken, **sp_args)
     comments: Mapped[list["RecipeComment"]] = orm.relationship("RecipeComment", **sp_args)
     recipe_timeline_events: Mapped[list["RecipeTimelineEvent"]] = orm.relationship("RecipeTimelineEvent", **sp_args)
     password_reset_tokens: Mapped[list["PasswordResetModel"]] = orm.relationship("PasswordResetModel", **sp_args)
+    in_app_notifications: Mapped[list["InAppNotificationModel"]] = orm.relationship("InAppNotificationModel", **sp_args)
 
     owned_recipes_id: Mapped[GUID | None] = mapped_column(GUID, ForeignKey("recipes.id"))
     owned_recipes: Mapped[Optional["RecipeModel"]] = orm.relationship(

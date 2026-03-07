@@ -1,37 +1,30 @@
+"""YouTube video scraper for recipe extraction.
+
+This module provides functionality to extract recipe content from YouTube videos
+by fetching video metadata and subtitles/captions via youtube-transcript-api.
+If no captions are available, it falls back to transcribing audio via OpenAI Whisper
+or faster-whisper (local).
+"""
+
 import asyncio
+import logging
+import os
 import re
+import tempfile
 from typing import Any
 
 import httpx
 
+from mealie.core.config import get_app_settings
+
+logger = logging.getLogger(__name__)
+
 _TRANSCRIPT_TIMEOUT_SECONDS = 20
 _MAX_TRANSCRIPT_CHARS = 12000
-_MIN_TRANSCRIPT_CHARS = 100
+_AUDIO_DOWNLOAD_TIMEOUT = 120
+_WHISPER_TIMEOUT = 180
 
 _VIDEO_ID_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
-
-
-class YouTubeTranscriptError(Exception):
-    """Raised when transcript extraction fails with a user-friendly message."""
-
-    def __init__(self, message: str, original_error: Exception | None = None):
-        super().__init__(message)
-        self.original_error = original_error
-
-
-def _get_transcript_error_message(error: Exception) -> str:
-    """Map transcript API exceptions to user-friendly messages."""
-    error_type = type(error).__name__
-    error_messages = {
-        "TranscriptsDisabled": "This video has no captions available.",
-        "VideoUnavailable": "This video is unavailable, private, or age-restricted.",
-        "TooManyRequests": "Rate limited by YouTube. Please try again later.",
-        "NoTranscriptFound": "No transcript found for this video.",
-        "NotTranslatable": "Transcript translation is not available for this video.",
-        "CookieInvalid": "Could not authenticate with YouTube cookies.",
-        "FailedToCreateCookieFile": "Could not create cookie file for YouTube authentication.",
-    }
-    return error_messages.get(error_type, f"Could not retrieve transcript: {error_type}")
 
 
 def extract_video_id(url: str) -> str | None:
@@ -53,23 +46,14 @@ async def get_video_metadata(url: str) -> dict[str, Any]:
         }
 
 
-def _fetch_transcript_sync(video_id: str) -> str:
+def _fetch_transcript_sync(video_id: str) -> str | None:
     """Synchronous transcript fetch — intended for use inside an executor.
 
     Tries manually-created transcripts first, then auto-generated ones,
     accepting any available language (not limited to English).
-
-    Raises:
-        YouTubeTranscriptError: If transcript extraction fails with a specific error.
     """
     try:
         from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore[import-untyped]
-        from youtube_transcript_api._errors import (  # type: ignore[import-untyped]
-            NoTranscriptFound,
-            TooManyRequests,
-            TranscriptsDisabled,
-            VideoUnavailable,
-        )
 
         api = YouTubeTranscriptApi()
         transcript_list = api.list(video_id)
@@ -85,19 +69,191 @@ def _fetch_transcript_sync(video_id: str) -> str:
 
         fetched = transcript.fetch()
         return " ".join(snippet.text for snippet in fetched)
-    except (TranscriptsDisabled, VideoUnavailable, TooManyRequests, NoTranscriptFound) as e:
-        raise YouTubeTranscriptError(_get_transcript_error_message(e), e) from e
-    except Exception as e:
-        raise YouTubeTranscriptError(_get_transcript_error_message(e), e) from e
+    except Exception:
+        return None
 
 
-async def get_transcript(video_id: str) -> str:
-    """Fetch and join all transcript segments for a YouTube video (async wrapper).
+def _download_audio_sync(url: str) -> str | None:
+    """Download audio from YouTube video using yt-dlp.
 
-    Raises:
-        YouTubeTranscriptError: If transcript fetch fails.
-        TimeoutError: If transcript fetch times out.
+    Returns the path to the downloaded audio file, or None if download fails.
     """
+    try:
+        import yt_dlp  # type: ignore[import-untyped]
+
+        # Create a temporary file for the audio
+        temp_dir = tempfile.mkdtemp()
+        output_template = f"{temp_dir}/audio.%(ext)s"
+
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": output_template,
+            "quiet": True,
+            "no_warnings": True,
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "64",  # Lower quality is fine for transcription
+                }
+            ],
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        # Find the downloaded audio file
+        for file in os.listdir(temp_dir):
+            if file.endswith((".mp3", ".m4a", ".webm", ".opus")):
+                return os.path.join(temp_dir, file)
+
+        return None
+
+    except Exception as e:
+        logger.warning(f"Failed to download audio from YouTube: {e}")
+        return None
+
+
+def _transcribe_audio_sync(audio_path: str) -> str | None:
+    """Transcribe audio file using OpenAI Whisper API."""
+    from openai import OpenAI
+
+    try:
+        settings = get_app_settings()
+
+        if not settings.openai_api_key:
+            logger.warning("OpenAI API key not configured, cannot transcribe audio")
+            return None
+
+        client = OpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+        )
+
+        with open(audio_path, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                response_format="text",
+            )
+
+        return transcript
+
+    except Exception as e:
+        logger.warning(f"Failed to transcribe audio with OpenAI Whisper: {e}")
+        return None
+
+
+def _transcribe_with_faster_whisper_sync(audio_path: str) -> str | None:
+    """Transcribe audio file using faster-whisper (local).
+
+    This runs locally on CPU/GPU without requiring an API key.
+    Supports models: tiny, base, small, medium, large-v3
+    For Romanian, 'medium' or 'large-v3' is recommended.
+    """
+    try:
+        from faster_whisper import WhisperModel  # type: ignore[import-untyped]
+    except ImportError:
+        logger.warning("faster-whisper is not installed. Install with: pip install mealie[whisper]")
+        return None
+
+    try:
+        settings = get_app_settings()
+        model_size = settings.WHISPER_MODEL
+
+        logger.info(f"Loading faster-whisper model '{model_size}' for transcription...")
+
+        # Use CPU with int8 quantization for broader compatibility
+        compute_type = "int8"
+
+        model = WhisperModel(model_size, device="cpu", compute_type=compute_type)
+
+        # Transcribe with language detection and beam search for better accuracy
+        segments, info = model.transcribe(audio_path, language=None, beam_size=5)
+
+        # Log detected language for debugging
+        logger.info(f"Detected language: {info.language} (probability: {info.language_probability:.2f})")
+
+        # Combine all segments into a single transcript
+        transcript_parts = []
+        for segment in segments:
+            transcript_parts.append(segment.text)
+
+        transcript = " ".join(transcript_parts).strip()
+        return transcript[:_MAX_TRANSCRIPT_CHARS] if transcript else None
+
+    except Exception as e:
+        logger.warning(f"Failed to transcribe audio with faster-whisper: {e}")
+        return None
+
+
+async def transcribe_audio_with_whisper(url: str) -> str | None:
+    """Download audio from YouTube and transcribe using configured Whisper provider.
+
+    This is used as a fallback when no captions are available.
+
+    The provider is determined by WHISPER_PROVIDER setting:
+    - "openai": Use OpenAI Whisper API (requires API key)
+    - "faster-whisper": Use local faster-whisper (no API key needed)
+    - "none": Disable transcription
+    """
+    settings = get_app_settings()
+    provider = settings.WHISPER_PROVIDER.lower()
+
+    if provider == "none":
+        logger.info("Whisper transcription is disabled (WHISPER_PROVIDER=none)")
+        return None
+
+    loop = asyncio.get_running_loop()
+
+    try:
+        # Download audio
+        logger.info("Downloading audio from YouTube for Whisper transcription...")
+        audio_path = await asyncio.wait_for(
+            loop.run_in_executor(None, _download_audio_sync, url),
+            timeout=_AUDIO_DOWNLOAD_TIMEOUT,
+        )
+
+        if not audio_path:
+            return None
+
+        # Choose transcription provider
+        if provider == "faster-whisper":
+            logger.info("Using faster-whisper for local transcription")
+            transcript = await asyncio.wait_for(
+                loop.run_in_executor(None, _transcribe_with_faster_whisper_sync, audio_path),
+                timeout=_WHISPER_TIMEOUT,
+            )
+        elif provider == "openai":
+            logger.info("Using OpenAI Whisper API for transcription")
+            transcript = await asyncio.wait_for(
+                loop.run_in_executor(None, _transcribe_audio_sync, audio_path),
+                timeout=_WHISPER_TIMEOUT,
+            )
+        else:
+            logger.warning(f"Unknown WHISPER_PROVIDER: {provider}. Use 'openai', 'faster-whisper', or 'none'")
+            transcript = None
+
+        # Cleanup temporary file
+        try:
+            import shutil
+
+            shutil.rmtree(os.path.dirname(audio_path), ignore_errors=True)
+        except Exception:
+            pass
+
+        return transcript
+
+    except TimeoutError:
+        logger.warning("Timeout while transcribing YouTube audio")
+        return None
+    except Exception as e:
+        logger.warning(f"Error in Whisper transcription: {e}")
+        return None
+
+
+async def get_transcript(video_id: str) -> str | None:
+    """Fetch and join all transcript segments for a YouTube video (async wrapper)."""
     loop = asyncio.get_running_loop()
     try:
         transcript = await asyncio.wait_for(
@@ -105,7 +261,10 @@ async def get_transcript(video_id: str) -> str:
             timeout=_TRANSCRIPT_TIMEOUT_SECONDS,
         )
     except TimeoutError:
-        raise YouTubeTranscriptError("Transcript fetch timed out. Please try again.") from None
+        return None
+
+    if not transcript:
+        return None
 
     return transcript[:_MAX_TRANSCRIPT_CHARS]
 
@@ -118,8 +277,7 @@ async def get_video_context(url: str) -> tuple[str, str | None]:
         "{title}\\n\\n{transcript}".
 
     Raises:
-        ValueError: For invalid URLs.
-        YouTubeTranscriptError: For transcript-related errors.
+        ValueError: For invalid URLs or videos with no available transcript.
     """
     video_id = extract_video_id(url)
     if not video_id:
@@ -133,14 +291,15 @@ async def get_video_context(url: str) -> tuple[str, str | None]:
     except Exception:
         metadata = {}
 
-    # Let YouTubeTranscriptError propagate with its user-friendly message
     transcript = await transcript_task
 
-    if len(transcript) < _MIN_TRANSCRIPT_CHARS:
-        raise ValueError(
-            f"Video transcript is too short ({len(transcript)} characters) to extract a recipe. "
-            "Please try a video with more content."
-        )
+    # If no captions found, try to transcribe audio with Whisper
+    if not transcript:
+        logger.info(f"No captions found for YouTube video {video_id}, trying Whisper transcription...")
+        transcript = await transcribe_audio_with_whisper(url)
+
+    if not transcript:
+        raise ValueError("No transcript found for this video. Please try a video with captions enabled.")
 
     title = metadata.get("title", "")
     thumbnail_url = metadata.get("thumbnail_url")

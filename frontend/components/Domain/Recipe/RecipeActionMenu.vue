@@ -18,6 +18,13 @@
       </v-card-text>
     </BaseDialog>
 
+    <RecipeEnhanceDialog
+      v-if="showEnhance"
+      v-model="enhanceDialog"
+      :recipe="recipe"
+      @enhanced="applyEnhancement"
+    />
+
     <v-spacer />
     <div v-if="!open" class="custom-btn-group ma-1">
       <RecipeFavoriteBadge v-if="loggedIn" color="info" button-style :recipe-id="recipe.id!" show-always />
@@ -50,6 +57,26 @@
           <span>{{ $t("general.edit") }}</span>
         </v-tooltip>
       </div>
+
+      <v-tooltip v-if="showEnhance" location="bottom" color="primary">
+        <template #activator="{ props: tooltipProps }">
+          <v-btn
+            icon
+            variant="flat"
+            rounded="circle"
+            size="small"
+            color="primary"
+            class="ml-1"
+            v-bind="tooltipProps"
+            @click="enhanceDialog = true"
+          >
+            <v-icon size="x-large">
+              {{ $globals.icons.robot }}
+            </v-icon>
+          </v-btn>
+        </template>
+        <span>{{ $t("recipe.enhance-recipe") }}</span>
+      </v-tooltip>
 
       <RecipeContextMenu
         show-print
@@ -103,7 +130,9 @@
 import RecipeContextMenu from "./RecipeContextMenu/RecipeContextMenu.vue";
 import RecipeFavoriteBadge from "./RecipeFavoriteBadge.vue";
 import RecipeTimelineBadge from "./RecipeTimelineBadge.vue";
+import RecipeEnhanceDialog from "./RecipeEnhanceDialog.vue";
 import type { Recipe } from "~/lib/api/types/recipe";
+import type { RecipeEnhanceResponse } from "~/lib/api/types/openai";
 
 const SAVE_EVENT = "save";
 const DELETE_EVENT = "delete";
@@ -126,12 +155,17 @@ withDefaults(defineProps<Props>(), {
   canEdit: false,
 });
 
-const emit = defineEmits(["print", "input", "save", "delete", "close", "json", "edit"]);
+const emit = defineEmits(["print", "input", "save", "delete", "close", "json", "edit", "enhanced"]);
 
 const deleteDialog = ref(false);
+const enhanceDialog = ref(false);
 
 const i18n = useI18n();
 const { $globals } = useNuxtApp();
+
+// Check if OpenAI is enabled (show enhance button)
+const appConfig = useAppConfig();
+const showEnhance = computed(() => appConfig.openaiEnabled === true);
 
 const editorButtons = [
   {
@@ -178,6 +212,10 @@ function emitHandler(event: string) {
 function emitDelete() {
   emit("delete");
   emit("input", false);
+}
+
+function applyEnhancement(result: RecipeEnhanceResponse) {
+  emit("enhanced", result);
 }
 </script>
 

@@ -1,10 +1,12 @@
 from fastapi import APIRouter
+from httpx import AsyncClient
 from recipe_scrapers import __version__ as recipe_scraper_version
 
 from mealie.core.release_checker import get_latest_version
+from mealie.core.settings.runtime_settings import get_runtime_settings
 from mealie.core.settings.static import APP_VERSION
 from mealie.routes._base import BaseAdminController, controller
-from mealie.schema.admin.about import AdminAboutInfo, AppStatistics, CheckAppConfig
+from mealie.schema.admin.about import AdminAboutInfo, AppStatistics, AvailableLLMModels, CheckAppConfig, LLMModel
 
 router = APIRouter(prefix="/about")
 
@@ -63,3 +65,61 @@ class AdminAboutController(BaseAdminController):
             oidc_ready=settings.OIDC_READY,
             enable_openai=settings.OPENAI_ENABLED,
         )
+
+    @router.get("/models", response_model=AvailableLLMModels)
+    async def get_available_models(self):
+        """Get available LLM models from the configured OpenAI-compatible API (LiteLLM)"""
+        settings = self.settings
+
+        # Get the runtime model if set, otherwise use the default
+        runtime_settings = get_runtime_settings().get_settings()
+        current_model = runtime_settings.llm_model or settings.OPENAI_MODEL
+
+        if not settings.OPENAI_ENABLED:
+            return AvailableLLMModels(models=[], current_model=current_model)
+
+        base_url = settings.OPENAI_BASE_URL or "https://api.openai.com/v1"
+        api_key = settings.OPENAI_API_KEY
+
+        try:
+            async with AsyncClient() as client:
+                response = await client.get(
+                    f"{base_url}/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=10.0,
+                )
+
+                if response.status_code != 200:
+                    self.logger.error(f"Failed to fetch models: {response.status_code}")
+                    return AvailableLLMModels(models=[], current_model=current_model)
+
+                data = response.json()
+                models = []
+                for model in data.get("data", []):
+                    model_id = model.get("id", "")
+                    if model_id:
+                        models.append(LLMModel(id=model_id, name=model_id))
+
+                # Sort models alphabetically
+                models.sort(key=lambda x: x.id)
+
+                return AvailableLLMModels(models=models, current_model=current_model)
+
+        except Exception as e:
+            self.logger.exception(f"Error fetching models: {e}")
+            return AvailableLLMModels(models=[], current_model=current_model)
+
+    @router.post("/models", response_model=LLMModel)
+    def set_llm_model(self, model: LLMModel):
+        """Set the LLM model to use for all OpenAI/LiteLLM requests."""
+        if not self.settings.OPENAI_ENABLED:
+            raise ValueError("OpenAI is not enabled")
+
+        get_runtime_settings().set_llm_model(model.id)
+        return model
+
+    @router.delete("/models")
+    def reset_llm_model(self):
+        """Reset the LLM model to the default from environment variables."""
+        get_runtime_settings().set_llm_model(None)
+        return {"message": "Model reset to default"}

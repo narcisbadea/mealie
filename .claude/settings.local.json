@@ -38,7 +38,14 @@
       "Bash(cd /c/Environments/pw/mealie && .venv/Scripts/python -c \"\nfrom youtube_transcript_api import YouTubeTranscriptApi\n\nvideo_id = 'GoNDvwneVVQ'\napi = YouTubeTranscriptApi\\(\\)\n\nprint\\('Listing transcripts...'\\)\ntry:\n    transcript_list = api.list\\(video_id\\)\n    print\\('Found transcripts:'\\)\n    for t in transcript_list:\n        print\\(f'  - language={t.language}, code={t.language_code}, is_generated={t.is_generated}'\\)\nexcept Exception as e:\n    print\\(f'ERROR listing: {type\\(e\\).__name__}: {e}'\\)\n\" 2>&1)",
       "Bash(grep:*)",
       "Bash(tail:*)",
-      "Bash(/tmp/debug-venv/bin/python:*)"
+      "Bash(/tmp/debug-venv/bin/python:*)",
+      "Bash(git pull:*)",
+      "Bash(git diff:*)",
+      "Bash(git stash:*)",
+      "Bash(git rm:*)",
+      "Bash(task py:check:*)",
+      "Bash(task py:lint:*)",
+      "Bash(task:*)"
     ]
   }
 }

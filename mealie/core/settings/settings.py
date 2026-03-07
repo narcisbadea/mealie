@@ -423,6 +423,22 @@ class AppSettings(AppLoggingSettings):
     files are individually optional, each prompt name will fall back to the default if no custom file exists
     """
 
+    # ===============================================
+    # Whisper Configuration (for video transcription)
+
+    WHISPER_PROVIDER: str = "openai"
+    """
+    Which Whisper provider to use for audio transcription.
+    Options: 'openai' (OpenAI Whisper API), 'faster-whisper' (local), 'none' (disabled)
+    """
+    WHISPER_MODEL: str = "medium"
+    """
+    Whisper model size for faster-whisper.
+    Options: 'tiny', 'base', 'small', 'medium', 'large-v3'
+    For Romanian and other languages with limited training data, 'medium' is recommended.
+    'medium' offers very good accuracy (~5GB RAM, slower than small).
+    """
+
     @property
     def OPENAI_FEATURE(self) -> FeatureDetails:
         description = None

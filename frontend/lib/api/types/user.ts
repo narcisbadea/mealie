@@ -94,6 +94,33 @@ export interface GroupSummary {
   slug: string;
   preferences?: ReadGroupPreferences | null;
 }
+export interface InAppNotificationCreate {
+  userId: string;
+  title: string;
+  message: string;
+  notificationType: string;
+  data?: {
+    [k: string]: unknown;
+  } | null;
+}
+export interface InAppNotificationMarkRead {
+  notificationIds?: string[] | null;
+}
+export interface InAppNotificationOut {
+  id: string;
+  title: string;
+  message: string;
+  notificationType: string;
+  data?: {
+    [k: string]: unknown;
+  } | null;
+  createdAt: string;
+  readAt?: string | null;
+}
+export interface InAppNotificationSummary {
+  unreadCount: number;
+  hasUnread: boolean;
+}
 export interface LongLiveTokenCreateResponse {
   name: string;
   id: number;

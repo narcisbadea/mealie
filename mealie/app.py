@@ -9,6 +9,7 @@ warnings.filterwarnings(
 # ruff: noqa: E402
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
@@ -19,6 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from mealie.core.config import get_app_settings
 from mealie.core.root_logger import get_logger
+from mealie.core.settings.runtime_settings import init_runtime_settings
 from mealie.core.settings.static import APP_VERSION
 from mealie.middleware.locale_context import LocaleContextMiddleware
 from mealie.routes import router, spa, utility_routes
@@ -27,6 +29,9 @@ from mealie.routes.media import media_router
 from mealie.services.scheduler import SchedulerRegistry, SchedulerService, tasks
 
 settings = get_app_settings()
+
+# Initialize runtime settings service
+init_runtime_settings(settings.DB_PROVIDER.data_dir if settings.DB_PROVIDER else Path("/app/data"))
 
 description = """
 Mealie is a web application for managing your recipes, meal plans, and shopping lists. This is the Restful

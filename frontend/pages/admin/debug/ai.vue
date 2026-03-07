@@ -56,6 +56,22 @@
               </v-col>
               <v-spacer />
             </v-row>
+            <!-- Model Selection Dropdown -->
+            <v-row v-if="$appInfo.enableOpenai">
+              <v-col cols="12">
+                <v-select
+                  v-model="selectedModel"
+                  :items="modelOptions"
+                  :label="$t('admin.select-model')"
+                  :loading="loadingModels"
+                  :disabled="loadingModels || models.length === 0"
+                  variant="outlined"
+                  clearable
+                  :hint="$t('admin.model-selection-hint')"
+                  persistent-hint
+                />
+              </v-col>
+            </v-row>
           </v-container>
         </v-card-text>
         <v-card-actions>
@@ -86,6 +102,7 @@
 <script lang="ts">
 import { useAdminApi } from "~/composables/api";
 import { alert } from "~/composables/use-toast";
+import type { LLMModel } from "~/lib/api/types/admin";
 
 export default defineNuxtComponent({
   setup() {
@@ -109,6 +126,42 @@ export default defineNuxtComponent({
     const uploadedImageName = ref<string>("");
     const uploadedImagePreviewUrl = ref<string>();
 
+    // Model selection state
+    const models = ref<LLMModel[]>([]);
+    const selectedModel = ref<string | null>(null);
+    const loadingModels = ref(false);
+
+    // Fetch available models on mount
+    onMounted(async () => {
+      await fetchModels();
+    });
+
+    async function fetchModels() {
+      loadingModels.value = true;
+      try {
+        const { data } = await api.about.getAvailableModels();
+        if (data) {
+          models.value = data.models;
+          if (data.currentModel && !selectedModel.value) {
+            selectedModel.value = data.currentModel;
+          }
+        }
+      }
+      catch (e) {
+        console.error("Failed to fetch models:", e);
+      }
+      finally {
+        loadingModels.value = false;
+      }
+    }
+
+    const modelOptions = computed(() => {
+      return models.value.map(model => ({
+        title: model.name,
+        value: model.id,
+      }));
+    });
+
     function uploadImage(fileObject: File) {
       uploadedImage.value = fileObject;
       uploadedImageName.value = fileObject.name;
@@ -125,7 +178,11 @@ export default defineNuxtComponent({
       response.value = "";
 
       loading.value = true;
-      const { data } = await api.debug.debugAI(uploadedImage.value);
+      const { data } = await api.debug.debugAI(
+        uploadedImage.value,
+        uploadedImageName.value,
+        selectedModel.value || undefined,
+      );
       loading.value = false;
 
       if (!data) {
@@ -142,6 +199,10 @@ export default defineNuxtComponent({
       uploadForm,
       uploadedImage,
       uploadedImagePreviewUrl,
+      models,
+      selectedModel,
+      loadingModels,
+      modelOptions,
       uploadImage,
       clearImage,
       testAI,

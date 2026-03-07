@@ -3,186 +3,128 @@ import pytest
 from mealie.services.scraper import tiktok_scraper
 
 
-# URL Validation Tests
-@pytest.mark.parametrize(
-    "url,expected_valid",
-    [
-        ("https://www.tiktok.com/@user/video/1234567890", True),
-        ("https://tiktok.com/@user/video/1234567890", True),
-        ("https://vm.tiktok.com/AbCdEfG/", True),
-        ("https://vt.tiktok.com/AbCdEfG/", True),
-        ("https://m.tiktok.com/v/1234567890.html", True),
-        ("http://www.tiktok.com/@user/video/123", True),
-        ("https://example.com/tiktok", False),
-        ("https://not-tiktok.com/@user/video/123", False),
-    ],
-)
-def test_is_tiktok_url_validation(url: str, expected_valid: bool):
-    """Test URL validation for various TikTok URL formats."""
-    assert tiktok_scraper._is_tiktok_url(url) == expected_valid
+def test_extract_video_id_supports_standard_urls():
+    """Test extraction from standard TikTok URLs."""
+    assert (
+        tiktok_scraper.extract_video_id("https://www.tiktok.com/@username/video/1234567890123456789")
+        == "1234567890123456789"
+    )
+    assert (
+        tiktok_scraper.extract_video_id("https://tiktok.com/@chef/video/9876543210987654321") == "9876543210987654321"
+    )
+
+
+def test_extract_video_id_supports_short_urls():
+    """Test extraction from short TikTok URLs."""
+    assert tiktok_scraper.extract_video_id("https://vm.tiktok.com/ZMxxxxxxx/") == "ZMxxxxxxx"
+    assert tiktok_scraper.extract_video_id("https://m.tiktok.com/t/abc123") == "abc123"
+
+
+def test_extract_video_id_returns_none_for_invalid_urls():
+    """Test that invalid URLs return None."""
+    assert tiktok_scraper.extract_video_id("https://example.com/video") is None
+    assert tiktok_scraper.extract_video_id("not a url") is None
+    assert tiktok_scraper.extract_video_id("https://youtube.com/watch?v=123") is None
 
 
 @pytest.mark.asyncio
-async def test_get_video_context_builds_combined_text(monkeypatch: pytest.MonkeyPatch):
-    async def mock_fetch_video_page_context(url: str):
-        return (
-            ["TikTok caption text", "Quick pasta recipe"],
-            ["https://example.com/captions.vtt"],
-            "https://example.com/og.jpg",
-        )
+async def test_get_video_context_success(monkeypatch: pytest.MonkeyPatch):
+    """Test successful video context extraction."""
 
     async def mock_get_video_metadata(url: str):
-        return {"title": "My TikTok Recipe", "thumbnail_url": "https://example.com/thumb.jpg"}
+        return {
+            "title": "Test TikTok Recipe",
+            "thumbnail_url": "https://example.com/thumb.jpg",
+            "author_name": "testuser",
+        }
 
-    async def mock_fetch_first_subtitle(urls: list[str]):
-        return "Step one. Step two."
+    async def mock_get_transcript(url: str):
+        return "Step 1: Mix ingredients. Step 2: Cook."
 
-    monkeypatch.setattr(tiktok_scraper, "_fetch_video_page_context", mock_fetch_video_page_context)
     monkeypatch.setattr(tiktok_scraper, "get_video_metadata", mock_get_video_metadata)
-    monkeypatch.setattr(tiktok_scraper, "_fetch_first_subtitle", mock_fetch_first_subtitle)
+    monkeypatch.setattr(tiktok_scraper, "get_transcript", mock_get_transcript)
 
-    combined_text, thumbnail_url = await tiktok_scraper.get_video_context(
-        "https://www.tiktok.com/@chef/video/123456789"
-    )
+    text, thumbnail = await tiktok_scraper.get_video_context("https://www.tiktok.com/@user/video/1234567890123456789")
 
-    assert "My TikTok Recipe" in combined_text
-    assert "Quick pasta recipe" in combined_text
-    assert "Step one. Step two." in combined_text
-    assert thumbnail_url == "https://example.com/thumb.jpg"
+    assert text == "Test TikTok Recipe\n\nStep 1: Mix ingredients. Step 2: Cook."
+    assert thumbnail == "https://example.com/thumb.jpg"
+
+
+@pytest.mark.asyncio
+async def test_get_video_context_allows_metadata_failure(monkeypatch: pytest.MonkeyPatch):
+    """Test that metadata failure doesn't prevent context extraction."""
+
+    async def mock_get_video_metadata(url: str):
+        raise RuntimeError("oembed error")
+
+    async def mock_get_transcript(url: str):
+        return "Recipe transcript from captions"
+
+    monkeypatch.setattr(tiktok_scraper, "get_video_metadata", mock_get_video_metadata)
+    monkeypatch.setattr(tiktok_scraper, "get_transcript", mock_get_transcript)
+
+    text, thumbnail = await tiktok_scraper.get_video_context("https://www.tiktok.com/@user/video/1234567890123456789")
+
+    assert text == "Recipe transcript from captions"
+    assert thumbnail is None
 
 
 @pytest.mark.asyncio
 async def test_get_video_context_rejects_invalid_url():
+    """Test that invalid URLs raise ValueError."""
     with pytest.raises(ValueError, match="Invalid TikTok URL"):
-        await tiktok_scraper.get_video_context("https://example.com/not-tiktok")
+        await tiktok_scraper.get_video_context("https://example.com/video")
 
 
-def test_extract_context_from_html_collects_text_and_subtitles():
-    html = """
-    <html>
-      <head>
-        <meta property=\"og:title\" content=\"Pasta in 10 Minutes\" />
-        <meta property=\"og:description\" content=\"Simple pantry pasta\" />
-        <meta property=\"og:image\" content=\"https://example.com/cover.jpg\" />
-      </head>
-      <body>
-        <script id=\"__UNIVERSAL_DATA_FOR_REHYDRATION__\" type=\"application/json\">
-          {
-            "videoDetail": {
-              "desc": "Cook with me: garlic pasta"
-            },
-            "subtitleInfos": [
-              {"LanguageCodeName": "en", "Url": "https://example.com/subtitles.vtt"}
-            ]
-          }
-        </script>
-      </body>
-    </html>
-    """
-
-    text_candidates, subtitle_urls, image_url = tiktok_scraper.extract_context_from_html(html)
-
-    assert "Pasta in 10 Minutes" in text_candidates
-    assert "Cook with me: garlic pasta" in text_candidates
-    assert "https://example.com/subtitles.vtt" in subtitle_urls
-    assert image_url == "https://example.com/cover.jpg"
-
-
-def test_parse_subtitle_payload_from_vtt():
-    vtt_payload = """
-    WEBVTT
-
-    1
-    00:00.000 --> 00:02.000
-    1 cup flour
-
-    2
-    00:02.000 --> 00:04.000
-    Mix well
-    """
-
-    transcript = tiktok_scraper._parse_subtitle_payload(vtt_payload)
-
-    assert transcript == "1 cup flour Mix well"
-
-
-# Subtitle URL Discovery Tests
-def test_collect_subtitle_urls_by_file_extension():
-    """Test that subtitle URLs are detected by file extension when nested in dicts."""
-    # Realistic TikTok-like structure where URLs are in objects with explicit keys
-    payload = {
-        "videoDetail": {
-            "resources": [
-                {"type": "video", "url": "https://example.com/video.mp4"},
-                {"type": "subtitle", "url": "https://example.com/subtitles.vtt"},
-                {"type": "caption", "url": "https://example.com/captions.srt"},
-            ]
-        }
-    }
-
-    urls = tiktok_scraper._collect_subtitle_urls(payload)
-
-    assert "https://example.com/subtitles.vtt" in urls
-    assert "https://example.com/captions.srt" in urls
-    assert "https://example.com/video.mp4" not in urls
-
-
-def test_collect_subtitle_urls_by_url_path():
-    """Test that subtitle URLs are detected by URL path patterns."""
-    # URLs with /subtitle/ or /caption/ in the path
-    payload = {
-        "media": {
-            "captionUrls": [
-                "https://example.com/subtitle/en.vtt",
-                "https://example.com/caption/fr.json",
-            ],
-            "videoUrl": "https://example.com/video/main.mp4",
-        }
-    }
-
-    urls = tiktok_scraper._collect_subtitle_urls(payload)
-
-    assert "https://example.com/subtitle/en.vtt" in urls
-    assert "https://example.com/caption/fr.json" in urls
-    assert "https://example.com/video/main.mp4" not in urls
-
-
-# Error Message Tests
 @pytest.mark.asyncio
-async def test_get_video_context_specific_error_no_captions(monkeypatch: pytest.MonkeyPatch):
-    """Test specific error message when video has no captions."""
-    async def mock_fetch_video_page_context(url: str):
-        return ([], [], None)  # No text, no subtitles, no image
+async def test_get_video_context_rejects_missing_transcript(monkeypatch: pytest.MonkeyPatch):
+    """Test that missing transcript raises ValueError."""
 
     async def mock_get_video_metadata(url: str):
-        return {"title": "", "thumbnail_url": None}
+        return {"title": "Test Video", "thumbnail_url": "https://example.com/thumb.jpg"}
 
-    async def mock_fetch_first_subtitle(urls: list[str]):
+    async def mock_get_transcript(url: str):
         return None
 
-    monkeypatch.setattr(tiktok_scraper, "_fetch_video_page_context", mock_fetch_video_page_context)
     monkeypatch.setattr(tiktok_scraper, "get_video_metadata", mock_get_video_metadata)
-    monkeypatch.setattr(tiktok_scraper, "_fetch_first_subtitle", mock_fetch_first_subtitle)
+    monkeypatch.setattr(tiktok_scraper, "get_transcript", mock_get_transcript)
 
-    with pytest.raises(ValueError, match="no captions available"):
-        await tiktok_scraper.get_video_context("https://www.tiktok.com/@chef/video/123456789")
+    with pytest.raises(ValueError, match="No captions found"):
+        await tiktok_scraper.get_video_context("https://www.tiktok.com/@user/video/1234567890123456789")
 
 
 @pytest.mark.asyncio
-async def test_get_video_context_specific_error_subtitle_fetch_failed(monkeypatch: pytest.MonkeyPatch):
-    """Test specific error message when subtitle references exist but fetch fails."""
-    async def mock_fetch_video_page_context(url: str):
-        return ([], ["https://example.com/subtitle.vtt"], None)  # Subtitle refs but no text
+async def test_get_transcript_truncates_long_transcript(monkeypatch: pytest.MonkeyPatch):
+    """Test that very long transcripts are truncated."""
 
-    async def mock_get_video_metadata(url: str):
-        return {"title": "", "thumbnail_url": None}
+    def mock_fetch_subtitles_sync(url: str):
+        return "x" * 20000
 
-    async def mock_fetch_first_subtitle(urls: list[str]):
-        return None  # Fetch failed
+    monkeypatch.setattr(tiktok_scraper, "_fetch_subtitles_sync", mock_fetch_subtitles_sync)
 
-    monkeypatch.setattr(tiktok_scraper, "_fetch_video_page_context", mock_fetch_video_page_context)
-    monkeypatch.setattr(tiktok_scraper, "get_video_metadata", mock_get_video_metadata)
-    monkeypatch.setattr(tiktok_scraper, "_fetch_first_subtitle", mock_fetch_first_subtitle)
+    transcript = await tiktok_scraper.get_transcript("https://www.tiktok.com/@user/video/1234567890123456789")
 
-    with pytest.raises(ValueError, match="Found caption references but could not fetch"):
-        await tiktok_scraper.get_video_context("https://www.tiktok.com/@chef/video/123456789")
+    assert transcript is not None
+    assert len(transcript) == 12000
+
+
+def test_parse_subtitle_content_srt_format():
+    """Test parsing SRT subtitle format."""
+    srt_content = """1
+00:00:00,000 --> 00:00:02,000
+First subtitle line
+
+2
+00:00:02,000 --> 00:00:04,000
+Second subtitle line
+"""
+    result = tiktok_scraper._parse_subtitle_content(srt_content)
+    assert "First subtitle line" in result
+    assert "Second subtitle line" in result
+
+
+def test_parse_subtitle_content_json_format():
+    """Test parsing JSON subtitle format."""
+    json_content = '[{"text": "Hello"}, {"text": "World"}]'
+    result = tiktok_scraper._parse_subtitle_content(json_content)
+    assert result == "Hello World"

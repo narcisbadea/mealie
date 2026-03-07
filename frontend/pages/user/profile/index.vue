@@ -32,93 +32,41 @@
         <UserInviteDialog v-model="inviteDialog" />
       </v-card>
     </section>
-    <section class="my-3">
-      <div>
-        <h3 class="text-h5">
-          {{ $t('profile.account-summary') }}
-        </h3>
-        <p>{{ $t('profile.account-summary-description') }}</p>
-      </div>
-      <v-row tag="section">
-        <v-col
-          cols="12"
-          sm="12"
-          md="12"
-        >
-          <v-card variant="outlined" style="border-color: lightgray;" class="mt-4">
-            <v-card-title class="text-h6 pb-0">
-              {{ $t('profile.household-statistics') }}
-            </v-card-title>
-            <v-card-text class="py-0">
-              {{ $t('profile.household-statistics-description') }}
-            </v-card-text>
-            <v-card-text
-              class="d-flex flex-wrap justify-center align-center"
-              style="gap: 0.8rem"
-            >
-              <StatsCards
-                v-for="(value, key) in stats"
-                :key="`${key}-${value}`"
-                :min-width="$vuetify.display.xs ? '100%' : '158'"
-                :icon="getStatsIcon(key)"
-                :to="getStatsTo(key)"
-              >
-                <template #title>
-                  {{ getStatsTitle(key) }}
-                </template>
-                <template #value>
-                  {{ value }}
-                </template>
-              </StatsCards>
-            </v-card-text>
-          </v-card>
-        </v-col>
-      </v-row>
-    </section>
+
+    <!-- Tabbed Interface for User Settings -->
+    <v-card variant="outlined" style="border-color: lightgray;" class="mt-4">
+      <v-tabs v-model="activeTab" color="primary" class="border-b">
+        <v-tab value="profile">
+          {{ $t('settings.profile') }}
+        </v-tab>
+        <v-tab value="preferences">
+          {{ $t('profile.preferences') }}
+        </v-tab>
+        <v-tab value="api-tokens">
+          {{ $t('settings.token.api-tokens') }}
+        </v-tab>
+      </v-tabs>
+
+      <v-card-text>
+        <v-window v-model="activeTab">
+          <v-window-item value="profile">
+            <UserProfileEdit />
+          </v-window-item>
+
+          <v-window-item value="preferences">
+            <UserPreferences />
+          </v-window-item>
+
+          <v-window-item value="api-tokens">
+            <UserApiTokens />
+          </v-window-item>
+        </v-window>
+      </v-card-text>
+    </v-card>
+
     <v-divider class="my-7" />
-    <section>
-      <div>
-        <h3 class="text-h6">
-          {{ $t('profile.personal') }}
-        </h3>
-        <p>{{ $t('profile.personal-description') }}</p>
-      </div>
-      <v-row tag="section">
-        <v-col
-          cols="12"
-          sm="12"
-          md="6"
-        >
-          <UserProfileLinkCard
-            :link="{ text: $t('profile.manage-user-profile'), to: `/user/profile/edit` }"
-            image="/svgs/manage-profile.svg"
-          >
-            <template #title>
-              {{ $t('profile.user-settings') }}
-            </template>
-            {{ $t('profile.user-settings-description') }}
-          </UserProfileLinkCard>
-        </v-col>
-        <AdvancedOnly>
-          <v-col
-            cols="12"
-            sm="12"
-            md="6"
-          >
-            <UserProfileLinkCard
-              :link="{ text: $t('profile.manage-your-api-tokens'), to: `/user/profile/api-tokens` }"
-              image="/svgs/manage-api-tokens.svg"
-            >
-              <template #title>
-                {{ $t('settings.token.api-tokens') }}
-              </template>
-              {{ $t('profile.api-tokens-description') }}
-            </UserProfileLinkCard>
-          </v-col>
-        </AdvancedOnly>
-      </v-row>
-    </section>
-    <v-divider class="my-7" />
+
+    <!-- Household Section -->
     <section>
       <div>
         <h3 class="text-h6">
@@ -276,12 +224,12 @@
 
 <script lang="ts">
 import UserProfileLinkCard from "@/components/Domain/User/UserProfileLinkCard.vue";
-import { useUserApi } from "~/composables/api";
 import UserAvatar from "@/components/Domain/User/UserAvatar.vue";
-import { useAsyncKey } from "~/composables/use-utils";
-import StatsCards from "~/components/global/StatsCards.vue";
 import type { UserOut } from "~/lib/api/types/user";
 import UserInviteDialog from "~/components/Domain/User/UserInviteDialog.vue";
+import UserProfileEdit from "./edit.vue";
+import UserApiTokens from "./api-tokens.vue";
+import UserPreferences from "./preferences.vue";
 
 export default defineNuxtComponent({
   name: "UserProfile",
@@ -289,10 +237,12 @@ export default defineNuxtComponent({
     UserInviteDialog,
     UserProfileLinkCard,
     UserAvatar,
-    StatsCards,
+    UserProfileEdit,
+    UserApiTokens,
+    UserPreferences,
   },
   scrollToTop: true,
-  async setup() {
+  setup() {
     const i18n = useI18n();
     const auth = useMealieAuth();
     const { $appInfo } = useNuxtApp();
@@ -317,63 +267,13 @@ export default defineNuxtComponent({
     });
 
     const inviteDialog = ref(false);
-    const api = useUserApi();
-
-    const { data: stats } = useAsyncData(useAsyncKey(), async () => {
-      const { data } = await api.households.statistics();
-
-      if (data) {
-        return data;
-      }
-    });
-
-    const statsText: { [key: string]: string } = {
-      totalRecipes: i18n.t("general.recipes"),
-      totalUsers: i18n.t("user.users"),
-      totalCategories: i18n.t("sidebar.categories"),
-      totalTags: i18n.t("sidebar.tags"),
-      totalTools: i18n.t("tool.tools"),
-    };
-
-    function getStatsTitle(key: string) {
-      return statsText[key] ?? "unknown";
-    }
-
-    const { $globals } = useNuxtApp();
-
-    const iconText: { [key: string]: string } = {
-      totalUsers: $globals.icons.user,
-      totalCategories: $globals.icons.categories,
-      totalTags: $globals.icons.tags,
-      totalTools: $globals.icons.potSteam,
-    };
-
-    function getStatsIcon(key: string) {
-      return iconText[key] ?? $globals.icons.primary;
-    }
-
-    const statsTo = computed<{ [key: string]: string }>(() => {
-      return {
-        totalRecipes: `/g/${groupSlug.value}/`,
-        totalUsers: "/household/members",
-        totalCategories: `/g/${groupSlug.value}/recipes/categories`,
-        totalTags: `/g/${groupSlug.value}/recipes/tags`,
-        totalTools: `/g/${groupSlug.value}/recipes/tools`,
-      };
-    });
-
-    function getStatsTo(key: string) {
-      return statsTo.value[key] ?? "unknown";
-    }
+    const activeTab = ref("profile");
 
     return {
       groupSlug,
-      getStatsTitle,
-      getStatsIcon,
-      getStatsTo,
       inviteDialog,
-      stats,
       user,
+      activeTab,
     };
   },
 });

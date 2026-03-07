@@ -86,7 +86,7 @@ class HouseholdInDB(HouseholdSummary):
             joinedload(Household.webhooks),
             joinedload(Household.preferences),
             selectinload(Household.users).joinedload(User.group),
-            selectinload(Household.users).joinedload(User.tokens),
+            selectinload(Household.users).joinedload(User.token),
         ]
 
     @field_validator("group", mode="before")

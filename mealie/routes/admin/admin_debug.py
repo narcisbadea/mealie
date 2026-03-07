@@ -1,7 +1,7 @@
 import os
 import shutil
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, Form, UploadFile
 
 from mealie.core.dependencies.dependencies import get_temporary_path
 from mealie.routes._base import BaseAdminController, controller
@@ -16,7 +16,11 @@ router = APIRouter(prefix="/debug")
 class AdminDebugController(BaseAdminController):
     @router.post("/openai", response_model=DebugResponse)
     @router.post("/ai", response_model=DebugResponse, include_in_schema=False)
-    async def debug_openai(self, image: UploadFile | None = File(None)):
+    async def debug_openai(
+        self,
+        image: UploadFile | None = File(None),
+        model: str | None = Form(None),
+    ):
         if not self.settings.OPENAI_ENABLED:
             return DebugResponse(success=False, response="AI is not enabled")
         if image and not self.settings.OPENAI_ENABLE_IMAGE_SERVICES:
@@ -32,7 +36,7 @@ class AdminDebugController(BaseAdminController):
                 local_images = None
 
             try:
-                openai_service = OpenAIService()
+                openai_service = OpenAIService(model=model)
                 prompt = openai_service.get_prompt("debug")
 
                 message = "Hello, checking to see if I can reach you."
@@ -46,7 +50,10 @@ class AdminDebugController(BaseAdminController):
                 if not response:
                     raise Exception("No response received from AI")
 
-                return DebugResponse(success=True, response=f'AI is working. Response: "{response.text}"')
+                return DebugResponse(
+                    success=True,
+                    response=f'AI is working with model "{openai_service.model}". Response: "{response.text}"',
+                )
 
             except Exception as e:
                 self.logger.exception(e)

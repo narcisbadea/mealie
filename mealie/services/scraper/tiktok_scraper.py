@@ -1,326 +1,408 @@
+"""TikTok video scraper for recipe extraction.
+
+This module provides functionality to extract recipe content from TikTok videos
+by fetching video metadata and subtitles/captions via yt-dlp.
+If no captions are available, it falls back to transcribing audio via OpenAI Whisper
+or faster-whisper (local).
+"""
+
 import asyncio
-import json
 import logging
+import os
 import re
-from collections.abc import Iterable
+import tempfile
 from typing import Any
 
 import httpx
-from bs4 import BeautifulSoup
 
-from mealie.pkgs.safehttp import AsyncSafeTransport
+from mealie.core.config import get_app_settings
 
 logger = logging.getLogger(__name__)
 
-_TIKTOK_URL_RE = re.compile(
-    r"^https?://(?:www\.)?(?:tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com|m\.tiktok\.com)/",
-    re.IGNORECASE,
+_TRANSCRIPT_TIMEOUT_SECONDS = 30
+_MAX_TRANSCRIPT_CHARS = 12000
+_AUDIO_DOWNLOAD_TIMEOUT = 60
+_WHISPER_TIMEOUT = 120
+
+# TikTok URL patterns:
+# - https://www.tiktok.com/@username/video/1234567890123456789
+# - https://vm.tiktok.com/ZMxxxxxxx/ (short URL)
+# - https://m.tiktok.com/t/xxxxxxx (mobile short URL)
+_VIDEO_ID_RE = re.compile(
+    r"(?:tiktok\.com/(?:@[\w.-]+/video/|t/)|vm\.tiktok\.com/|m\.tiktok\.com/t/)([0-9]+|[A-Za-z0-9]+)"
 )
-_WHITESPACE_RE = re.compile(r"\s+")
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
-_SCRIPT_JSON_IDS = {"__UNIVERSAL_DATA_FOR_REHYDRATION__", "__NEXT_DATA__", "SIGI_STATE"}
-_TIMESTAMP_LINE_RE = re.compile(r"^\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}\s+-->\s+\d{1,2}:\d{2}(?::\d{2})?[.,]\d{3}$")
 
 
-def _normalize_text(text: str) -> str:
-    return _WHITESPACE_RE.sub(" ", text).strip()
+def extract_video_id(url: str) -> str | None:
+    """Extract the video ID from a TikTok URL.
 
-
-def _looks_like_url(value: str) -> bool:
-    return value.startswith("http://") or value.startswith("https://")
-
-
-def _is_tiktok_url(url: str) -> bool:
-    return bool(_TIKTOK_URL_RE.match(url.strip()))
-
-
-def _safe_json_loads(text: str) -> Any | None:
-    try:
-        return json.loads(text)
-    except Exception:
-        return None
-
-
-def _collect_text_candidates(payload: Any, path: tuple[str, ...] = ()) -> list[str]:
-    values: list[str] = []
-    text_keys = {"desc", "description", "text", "title", "sharetitle", "sharedesc", "caption"}
-
-    if isinstance(payload, dict):
-        for raw_key, value in payload.items():
-            key = str(raw_key).lower()
-            key_path = (*path, key)
-
-            if isinstance(value, str):
-                normalized = _normalize_text(value)
-                if normalized and not _looks_like_url(normalized):
-                    if key in text_keys or "subtitle" in key or "caption" in key:
-                        values.append(normalized)
-            else:
-                values.extend(_collect_text_candidates(value, key_path))
-
-    elif isinstance(payload, list):
-        for item in payload:
-            values.extend(_collect_text_candidates(item, path))
-
-    return values
-
-
-_SUBTITLE_EXTENSIONS = {".vtt", ".srt", ".ttml", ".dfxp"}
-_SUBTITLE_PATH_PATTERNS = {"subtitle", "caption", "transcript"}
-
-
-def _collect_subtitle_urls(payload: Any, path: tuple[str, ...] = ()) -> list[str]:
-    urls: list[str] = []
-
-    # Handle string URLs directly (when called from list iteration)
-    if isinstance(payload, str) and _looks_like_url(payload):
-        has_subtitle_ext = any(payload.lower().endswith(ext) for ext in _SUBTITLE_EXTENSIONS)
-        has_subtitle_url_path = "/subtitle/" in payload.lower() or "/caption/" in payload.lower()
-        if has_subtitle_ext or has_subtitle_url_path:
-            urls.append(payload)
-        return urls
-
-    if isinstance(payload, dict):
-        for raw_key, value in payload.items():
-            key = str(raw_key).lower()
-            key_path = (*path, key)
-            path_text = "/".join(key_path)
-
-            if isinstance(value, str) and _looks_like_url(value):
-                # Check path hints OR file extension OR URL path pattern
-                has_subtitle_hint = any(p in path_text for p in _SUBTITLE_PATH_PATTERNS)
-                has_subtitle_ext = any(value.lower().endswith(ext) for ext in _SUBTITLE_EXTENSIONS)
-                has_subtitle_url_path = "/subtitle/" in value.lower() or "/caption/" in value.lower()
-
-                if has_subtitle_hint or has_subtitle_ext or has_subtitle_url_path:
-                    urls.append(value)
-            else:
-                urls.extend(_collect_subtitle_urls(value, key_path))
-
-    elif isinstance(payload, list):
-        for item in payload:
-            urls.extend(_collect_subtitle_urls(item, path))
-
-    return urls
-
-
-def _dedupe_keep_order(values: Iterable[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-
-    for value in values:
-        normalized = _normalize_text(value)
-        if not normalized:
-            continue
-        if normalized in seen:
-            continue
-        deduped.append(normalized)
-        seen.add(normalized)
-
-    return deduped
-
-
-def _limit_text_candidates(values: list[str], max_items: int = 20, max_chars: int = 5000) -> list[str]:
-    limited: list[str] = []
-    char_count = 0
-
-    for value in values:
-        snippet = value[:800]
-        if len(snippet) < 10:
-            continue
-        if char_count + len(snippet) > max_chars:
-            break
-        limited.append(snippet)
-        char_count += len(snippet)
-        if len(limited) >= max_items:
-            break
-
-    return limited
-
-
-def _extract_json_from_html(soup: BeautifulSoup) -> list[Any]:
-    payloads: list[Any] = []
-    for script in soup.find_all("script"):
-        script_id = (script.get("id") or "").strip()
-        script_type = (script.get("type") or "").strip().lower()
-        script_body = (script.string or script.get_text() or "").strip()
-
-        if not script_body:
-            continue
-
-        if script_id in _SCRIPT_JSON_IDS or script_type == "application/json":
-            parsed = _safe_json_loads(script_body)
-            if parsed is not None:
-                payloads.append(parsed)
-
-    return payloads
-
-
-def _extract_meta_content(soup: BeautifulSoup, attr_name: str, attr_value: str) -> str | None:
-    tag = soup.find("meta", attrs={attr_name: attr_value})
-    content = tag.get("content") if tag else None
-    if not isinstance(content, str):
-        return None
-    content = _normalize_text(content)
-    return content or None
-
-
-def _parse_subtitle_payload(raw: str) -> str | None:
-    raw = raw.strip()
-    if not raw:
-        return None
-
-    # Try JSON subtitles first.
-    payload = _safe_json_loads(raw)
-    if payload is not None:
-        candidates = _collect_text_candidates(payload)
-        return " ".join(_dedupe_keep_order(candidates)) if candidates else None
-
-    lines: list[str] = []
-    for line in raw.splitlines():
-        candidate = line.strip()
-        if not candidate:
-            continue
-        if candidate == "WEBVTT":
-            continue
-        if candidate.isdigit():
-            continue
-        if _TIMESTAMP_LINE_RE.match(candidate):
-            continue
-
-        candidate = _HTML_TAG_RE.sub("", candidate)
-        candidate = _normalize_text(candidate)
-        if candidate:
-            lines.append(candidate)
-
-    if not lines:
-        return None
-
-    return " ".join(_dedupe_keep_order(lines))
-
-
-def extract_context_from_html(html: str) -> tuple[list[str], list[str], str | None]:
-    soup = BeautifulSoup(html, "html.parser")
-    text_candidates: list[str] = []
-
-    for attr_name, attr_value in (
-        ("property", "og:title"),
-        ("property", "og:description"),
-        ("name", "description"),
-    ):
-        meta_content = _extract_meta_content(soup, attr_name, attr_value)
-        if meta_content:
-            text_candidates.append(meta_content)
-
-    image_url = _extract_meta_content(soup, "property", "og:image")
-
-    subtitle_urls: list[str] = []
-    for payload in _extract_json_from_html(soup):
-        text_candidates.extend(_collect_text_candidates(payload))
-        subtitle_urls.extend(_collect_subtitle_urls(payload))
-
-    deduped_text = _dedupe_keep_order(text_candidates)
-    limited_text = _limit_text_candidates(deduped_text)
-    return limited_text, _dedupe_keep_order(subtitle_urls), image_url
-
-
-async def _fetch_video_page_context(url: str) -> tuple[list[str], list[str], str | None]:
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
-        )
-    }
-    async with httpx.AsyncClient(
-        timeout=12.0, follow_redirects=True, headers=headers, transport=AsyncSafeTransport()
-    ) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return extract_context_from_html(response.text)
-
-
-async def _fetch_first_subtitle(subtitle_urls: list[str]) -> str | None:
-    if not subtitle_urls:
-        return None
-
-    async with httpx.AsyncClient(
-        timeout=12.0, follow_redirects=True, transport=AsyncSafeTransport()
-    ) as client:
-        for subtitle_url in subtitle_urls[:3]:
-            try:
-                response = await client.get(subtitle_url)
-                response.raise_for_status()
-                transcript = _parse_subtitle_payload(response.text)
-                if transcript:
-                    return transcript
-            except Exception:
-                continue
-
-    return None
+    Supports:
+    - Standard URLs: tiktok.com/@user/video/1234567890
+    - Short URLs: vm.tiktok.com/xxxxx
+    - Mobile URLs: m.tiktok.com/t/xxxxx
+    """
+    match = _VIDEO_ID_RE.search(url)
+    return match.group(1) if match else None
 
 
 async def get_video_metadata(url: str) -> dict[str, Any]:
+    """Fetch video title and thumbnail URL from the TikTok oEmbed API."""
     oembed_url = f"https://www.tiktok.com/oembed?url={url}"
-    async with httpx.AsyncClient(timeout=10.0, transport=AsyncSafeTransport()) as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(oembed_url)
         response.raise_for_status()
         data = response.json()
         return {
             "title": data.get("title", ""),
             "thumbnail_url": data.get("thumbnail_url"),
+            "author_name": data.get("author_name", ""),
         }
 
 
-async def get_video_context(url: str) -> tuple[str, str | None]:
-    if not _is_tiktok_url(url):
-        raise ValueError("Invalid TikTok URL. Please provide a valid TikTok video link.")
+def _fetch_subtitles_sync(url: str) -> str | None:
+    """Synchronous subtitle fetch using yt-dlp.
 
-    page_task = asyncio.create_task(_fetch_video_page_context(url))
-    metadata_task = asyncio.create_task(get_video_metadata(url))
-
-    metadata: dict[str, Any] = {}
+    yt-dlp can extract subtitles from TikTok videos if they are available.
+    This runs in an executor to avoid blocking the event loop.
+    """
     try:
-        metadata = await metadata_task
-    except Exception as e:
-        logger.debug("TikTok oEmbed API failed: %s", e)
-        metadata = {}
+        import yt_dlp  # type: ignore[import-untyped]
 
-    text_candidates: list[str] = []
-    subtitle_urls: list[str] = []
-    og_image: str | None = None
-    page_error: Exception | None = None
+        ydl_opts = {
+            "skip_download": True,  # Don't download the video
+            "writesubtitles": True,  # Try to get subtitles
+            "writeautomaticsub": True,  # Try to get auto-generated subtitles
+            "subtitleslangs": ["en", "all"],  # Prefer English, but accept any
+            "quiet": True,
+            "no_warnings": True,
+            "outtmpl": "-",  # Don't write files, just extract info
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+            if not info:
+                return None
+
+            # Try to get subtitles from the info
+            subtitles = info.get("subtitles", {}) or info.get("automatic_captions", {})
+
+            # Prefer English subtitles
+            for lang in ["en", "en-US", "en-GB"]:
+                if lang in subtitles and subtitles[lang]:
+                    # Get the first subtitle track
+                    sub_list = subtitles[lang]
+                    if sub_list:
+                        # Fetch the subtitle content
+                        sub_url = sub_list[0].get("url")
+                        if sub_url:
+                            import urllib.request
+
+                            with urllib.request.urlopen(sub_url, timeout=10) as response:
+                                content = response.read().decode("utf-8")
+                                return _parse_subtitle_content(content)
+
+            # If no preferred language, try any available
+            for _, subs in subtitles.items():
+                if subs:
+                    sub_url = subs[0].get("url")
+                    if sub_url:
+                        import urllib.request
+
+                        with urllib.request.urlopen(sub_url, timeout=10) as response:
+                            content = response.read().decode("utf-8")
+                            return _parse_subtitle_content(content)
+
+            return None
+
+    except Exception:
+        return None
+
+
+def _parse_subtitle_content(content: str) -> str:
+    """Parse subtitle content (SRT, VTT, or JSON format) and extract text."""
+    # Try JSON format first (TikTok sometimes uses this)
+    stripped = content.strip()
+    if stripped.startswith("{") or stripped.startswith("["):
+        try:
+            import json
+
+            data = json.loads(content)
+            if isinstance(data, list):
+                return " ".join(item.get("text", "") for item in data if isinstance(item, dict))
+            elif isinstance(data, dict) and "subtitles" in data:
+                return " ".join(item.get("text", "") for item in data["subtitles"] if isinstance(item, dict))
+        except json.JSONDecodeError:
+            pass
+
+    # Parse SRT/VTT format - extract text lines
+    lines = content.strip().split("\n")
+    text_lines = []
+    for line in lines:
+        line = line.strip()
+        # Skip timestamp lines, sequence numbers, and WEBVTT headers
+        if (
+            not line
+            or line.isdigit()
+            or "-->" in line
+            or line.startswith("WEBVTT")
+            or line.startswith("NOTE")
+            or line.startswith("STYLE")
+            or re.match(r"<\d{2}:\d{2}:\d{2}", line)
+        ):
+            continue
+        # Clean up any HTML-like tags
+        line = re.sub(r"<[^>]+>", "", line)
+        if line:
+            text_lines.append(line)
+
+    return " ".join(text_lines)
+
+
+def _download_audio_sync(url: str) -> str | None:
+    """Download audio from TikTok video using yt-dlp.
+
+    Returns the path to the downloaded audio file, or None if download fails.
+    """
     try:
-        text_candidates, subtitle_urls, og_image = await page_task
+        import yt_dlp  # type: ignore[import-untyped]
+
+        # Create a temporary file for the audio
+        temp_dir = tempfile.mkdtemp()
+        output_template = f"{temp_dir}/audio.%(ext)s"
+
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": output_template,
+            "quiet": True,
+            "no_warnings": True,
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "64",  # Lower quality is fine for transcription
+                }
+            ],
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        # Find the downloaded audio file
+        import os
+
+        for file in os.listdir(temp_dir):
+            if file.endswith((".mp3", ".m4a", ".webm", ".opus")):
+                return os.path.join(temp_dir, file)
+
+        return None
+
     except Exception as e:
-        page_error = e
-        if not metadata:
-            raise ValueError(
-                "Unable to access TikTok video details. "
-                "The video may be private, deleted, or age-restricted."
-            ) from e
+        logger.warning(f"Failed to download audio from TikTok: {e}")
+        return None
 
-    transcript = await _fetch_first_subtitle(subtitle_urls)
-    if transcript:
-        transcript = transcript[:8000]
 
-    combined_parts = _dedupe_keep_order([metadata.get("title", ""), *text_candidates, transcript or ""])
+def _transcribe_audio_sync(audio_path: str) -> str | None:
+    """Transcribe audio file using OpenAI Whisper API."""
+    from openai import OpenAI
 
-    if not combined_parts:
-        # Provide specific error messages based on what failed
-        if page_error:
-            raise ValueError(
-                "Failed to extract video content. TikTok may have changed their page structure. "
-                "Please try again later or use a different video."
-            )
-        if subtitle_urls and not transcript:
-            raise ValueError(
-                "Found caption references but could not fetch them. "
-                "The video may be private, age-restricted, or region-locked."
-            )
-        raise ValueError(
-            "This TikTok video has no captions available. "
-            "Please try a video with captions/subtitles enabled."
+    try:
+        settings = get_app_settings()
+
+        if not settings.openai_api_key:
+            logger.warning("OpenAI API key not configured, cannot transcribe audio")
+            return None
+
+        client = OpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
         )
 
-    thumbnail_url = metadata.get("thumbnail_url") or og_image
-    return "\n\n".join(combined_parts), thumbnail_url
+        with open(audio_path, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                response_format="text",
+            )
+
+        return transcript
+
+    except Exception as e:
+        logger.warning(f"Failed to transcribe audio with OpenAI Whisper: {e}")
+        return None
+
+
+def _transcribe_with_faster_whisper_sync(audio_path: str) -> str | None:
+    """Transcribe audio file using faster-whisper (local).
+
+    This runs locally on CPU/GPU without requiring an API key.
+    Supports models: tiny, base, small, medium, large-v3
+    For Romanian, 'medium' or 'large-v3' is recommended.
+    """
+    try:
+        from faster_whisper import WhisperModel  # type: ignore[import-untyped]
+    except ImportError:
+        logger.warning("faster-whisper is not installed. Install with: pip install mealie[whisper]")
+        return None
+
+    try:
+        settings = get_app_settings()
+        model_size = settings.WHISPER_MODEL
+
+        logger.info(f"Loading faster-whisper model '{model_size}' for transcription...")
+
+        # Use CPU with int8 quantization for broader compatibility
+        # For large-v3 model, use float16 if available, otherwise int8
+        compute_type = "int8"
+        if model_size.startswith("large"):
+            # Large models benefit from float16 but require more RAM
+            # int8 works but may be slightly less accurate
+            compute_type = "int8"
+
+        model = WhisperModel(model_size, device="cpu", compute_type=compute_type)
+
+        # Transcribe with language detection
+        # For better Romanian results, we let it auto-detect
+        segments, info = model.transcribe(audio_path, language=None, beam_size=5)
+
+        # Log detected language for debugging
+        logger.info(f"Detected language: {info.language} (probability: {info.language_probability:.2f})")
+
+        # Combine all segments into a single transcript
+        transcript_parts = []
+        for segment in segments:
+            transcript_parts.append(segment.text)
+
+        transcript = " ".join(transcript_parts).strip()
+        return transcript[:_MAX_TRANSCRIPT_CHARS] if transcript else None
+
+    except Exception as e:
+        logger.warning(f"Failed to transcribe audio with faster-whisper: {e}")
+        return None
+
+
+async def transcribe_audio_with_whisper(url: str) -> str | None:
+    """Download audio from TikTok and transcribe using configured Whisper provider.
+
+    This is used as a fallback when no captions are available.
+
+    The provider is determined by WHISPER_PROVIDER setting:
+    - "openai": Use OpenAI Whisper API (requires API key)
+    - "faster-whisper": Use local faster-whisper (no API key needed)
+    - "none": Disable transcription
+    """
+    settings = get_app_settings()
+    provider = settings.WHISPER_PROVIDER.lower()
+
+    if provider == "none":
+        logger.info("Whisper transcription is disabled (WHISPER_PROVIDER=none)")
+        return None
+
+    loop = asyncio.get_running_loop()
+
+    try:
+        # Download audio
+        audio_path = await asyncio.wait_for(
+            loop.run_in_executor(None, _download_audio_sync, url),
+            timeout=_AUDIO_DOWNLOAD_TIMEOUT,
+        )
+
+        if not audio_path:
+            return None
+
+        # Choose transcription provider
+        if provider == "faster-whisper":
+            logger.info("Using faster-whisper for local transcription")
+            transcript = await asyncio.wait_for(
+                loop.run_in_executor(None, _transcribe_with_faster_whisper_sync, audio_path),
+                timeout=_WHISPER_TIMEOUT,
+            )
+        elif provider == "openai":
+            logger.info("Using OpenAI Whisper API for transcription")
+            transcript = await asyncio.wait_for(
+                loop.run_in_executor(None, _transcribe_audio_sync, audio_path),
+                timeout=_WHISPER_TIMEOUT,
+            )
+        else:
+            logger.warning(f"Unknown WHISPER_PROVIDER: {provider}. Use 'openai', 'faster-whisper', or 'none'")
+            transcript = None
+
+        # Cleanup temporary file
+        try:
+            import shutil
+
+            shutil.rmtree(os.path.dirname(audio_path), ignore_errors=True)
+        except Exception:
+            pass
+
+        return transcript
+
+    except TimeoutError:
+        logger.warning("Timeout while transcribing TikTok audio")
+        return None
+    except Exception as e:
+        logger.warning(f"Error in Whisper transcription: {e}")
+        return None
+
+
+async def get_transcript(url: str) -> str | None:
+    """Fetch and join all transcript segments for a TikTok video (async wrapper)."""
+    loop = asyncio.get_running_loop()
+    try:
+        transcript = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_subtitles_sync, url),
+            timeout=_TRANSCRIPT_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        return None
+
+    if not transcript:
+        return None
+
+    return transcript[:_MAX_TRANSCRIPT_CHARS]
+
+
+async def get_video_context(url: str) -> tuple[str, str | None]:
+    """Orchestrate metadata + transcript extraction for a TikTok URL.
+
+    Returns:
+        A tuple of (combined_text, thumbnail_url) where combined_text is
+        "{title}\\n\\n{transcript}".
+
+    Raises:
+        ValueError: For invalid URLs or videos with no available transcript.
+    """
+    # Normalize URL - ensure it has a scheme
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    video_id = extract_video_id(url)
+    if not video_id:
+        raise ValueError("Invalid TikTok URL. Please provide a valid TikTok video link.")
+
+    # For short URLs, we need to resolve them first to get the canonical URL
+    # yt-dlp handles this automatically in _fetch_subtitles_sync
+
+    metadata_task = asyncio.create_task(get_video_metadata(url))
+    transcript_task = asyncio.create_task(get_transcript(url))
+
+    try:
+        metadata = await metadata_task
+    except Exception:
+        metadata = {}
+
+    transcript = await transcript_task
+
+    # If no captions found, try to transcribe audio with Whisper
+    if not transcript:
+        logger.info(f"No captions found for TikTok video {video_id}, trying Whisper transcription...")
+        transcript = await transcribe_audio_with_whisper(url)
+
+    if not transcript:
+        raise ValueError("No captions found for this TikTok video. Please try a video with captions enabled.")
+
+    title = metadata.get("title", "")
+    thumbnail_url = metadata.get("thumbnail_url")
+
+    combined_text = f"{title}\n\n{transcript}" if title else transcript
+    return combined_text, thumbnail_url

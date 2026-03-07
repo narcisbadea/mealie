@@ -42,7 +42,11 @@ class ScrapeRecipeText(MealieModel):
 
 class ScrapeRecipeYouTube(MealieModel):
     url: str
+    target_language: str | None = None
+    correct_grammar: bool = True
 
 
 class ScrapeRecipeTikTok(MealieModel):
     url: str
+    target_language: str | None = None
+    correct_grammar: bool = True
