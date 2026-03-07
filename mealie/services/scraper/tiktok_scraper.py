@@ -7,7 +7,10 @@ from typing import Any
 import httpx
 from bs4 import BeautifulSoup
 
-_TIKTOK_URL_RE = re.compile(r"^https?://(?:www\.)?(?:tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com)/", re.IGNORECASE)
+_TIKTOK_URL_RE = re.compile(
+    r"^https?://(?:www\.)?(?:tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com|m\.tiktok\.com)/",
+    re.IGNORECASE,
+)
 _WHITESPACE_RE = re.compile(r"\s+")
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _SCRIPT_JSON_IDS = {"__UNIVERSAL_DATA_FOR_REHYDRATION__", "__NEXT_DATA__", "SIGI_STATE"}
@@ -57,8 +60,20 @@ def _collect_text_candidates(payload: Any, path: tuple[str, ...] = ()) -> list[s
     return values
 
 
+_SUBTITLE_EXTENSIONS = {".vtt", ".srt", ".ttml", ".dfxp"}
+_SUBTITLE_PATH_PATTERNS = {"subtitle", "caption", "transcript"}
+
+
 def _collect_subtitle_urls(payload: Any, path: tuple[str, ...] = ()) -> list[str]:
     urls: list[str] = []
+
+    # Handle string URLs directly (when called from list iteration)
+    if isinstance(payload, str) and _looks_like_url(payload):
+        has_subtitle_ext = any(payload.lower().endswith(ext) for ext in _SUBTITLE_EXTENSIONS)
+        has_subtitle_url_path = "/subtitle/" in payload.lower() or "/caption/" in payload.lower()
+        if has_subtitle_ext or has_subtitle_url_path:
+            urls.append(payload)
+        return urls
 
     if isinstance(payload, dict):
         for raw_key, value in payload.items():
@@ -67,7 +82,12 @@ def _collect_subtitle_urls(payload: Any, path: tuple[str, ...] = ()) -> list[str
             path_text = "/".join(key_path)
 
             if isinstance(value, str) and _looks_like_url(value):
-                if "subtitle" in path_text or "caption" in path_text:
+                # Check path hints OR file extension OR URL path pattern
+                has_subtitle_hint = any(p in path_text for p in _SUBTITLE_PATH_PATTERNS)
+                has_subtitle_ext = any(value.lower().endswith(ext) for ext in _SUBTITLE_EXTENSIONS)
+                has_subtitle_url_path = "/subtitle/" in value.lower() or "/caption/" in value.lower()
+
+                if has_subtitle_hint or has_subtitle_ext or has_subtitle_url_path:
                     urls.append(value)
             else:
                 urls.extend(_collect_subtitle_urls(value, key_path))
@@ -258,11 +278,16 @@ async def get_video_context(url: str) -> tuple[str, str | None]:
     text_candidates: list[str] = []
     subtitle_urls: list[str] = []
     og_image: str | None = None
+    page_error: Exception | None = None
     try:
         text_candidates, subtitle_urls, og_image = await page_task
     except Exception as e:
+        page_error = e
         if not metadata:
-            raise ValueError("Unable to access TikTok video details.") from e
+            raise ValueError(
+                "Unable to access TikTok video details. "
+                "The video may be private, deleted, or age-restricted."
+            ) from e
 
     transcript = await _fetch_first_subtitle(subtitle_urls)
     if transcript:
@@ -271,7 +296,21 @@ async def get_video_context(url: str) -> tuple[str, str | None]:
     combined_parts = _dedupe_keep_order([metadata.get("title", ""), *text_candidates, transcript or ""])
 
     if not combined_parts:
-        raise ValueError("No captions or textual context were found for this TikTok video. Please try another video.")
+        # Provide specific error messages based on what failed
+        if page_error:
+            raise ValueError(
+                "Failed to extract video content. TikTok may have changed their page structure. "
+                "Please try again later or use a different video."
+            )
+        if subtitle_urls and not transcript:
+            raise ValueError(
+                "Found caption references but could not fetch them. "
+                "The video may be private, age-restricted, or region-locked."
+            )
+        raise ValueError(
+            "This TikTok video has no captions available. "
+            "Please try a video with captions/subtitles enabled."
+        )
 
     thumbnail_url = metadata.get("thumbnail_url") or og_image
     return "\n\n".join(combined_parts), thumbnail_url
