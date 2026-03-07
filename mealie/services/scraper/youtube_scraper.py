@@ -6,8 +6,32 @@ import httpx
 
 _TRANSCRIPT_TIMEOUT_SECONDS = 20
 _MAX_TRANSCRIPT_CHARS = 12000
+_MIN_TRANSCRIPT_CHARS = 100
 
 _VIDEO_ID_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
+
+
+class YouTubeTranscriptError(Exception):
+    """Raised when transcript extraction fails with a user-friendly message."""
+
+    def __init__(self, message: str, original_error: Exception | None = None):
+        super().__init__(message)
+        self.original_error = original_error
+
+
+def _get_transcript_error_message(error: Exception) -> str:
+    """Map transcript API exceptions to user-friendly messages."""
+    error_type = type(error).__name__
+    error_messages = {
+        "TranscriptsDisabled": "This video has no captions available.",
+        "VideoUnavailable": "This video is unavailable, private, or age-restricted.",
+        "TooManyRequests": "Rate limited by YouTube. Please try again later.",
+        "NoTranscriptFound": "No transcript found for this video.",
+        "NotTranslatable": "Transcript translation is not available for this video.",
+        "CookieInvalid": "Could not authenticate with YouTube cookies.",
+        "FailedToCreateCookieFile": "Could not create cookie file for YouTube authentication.",
+    }
+    return error_messages.get(error_type, f"Could not retrieve transcript: {error_type}")
 
 
 def extract_video_id(url: str) -> str | None:
@@ -29,14 +53,23 @@ async def get_video_metadata(url: str) -> dict[str, Any]:
         }
 
 
-def _fetch_transcript_sync(video_id: str) -> str | None:
+def _fetch_transcript_sync(video_id: str) -> str:
     """Synchronous transcript fetch — intended for use inside an executor.
 
     Tries manually-created transcripts first, then auto-generated ones,
     accepting any available language (not limited to English).
+
+    Raises:
+        YouTubeTranscriptError: If transcript extraction fails with a specific error.
     """
     try:
         from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore[import-untyped]
+        from youtube_transcript_api._errors import (  # type: ignore[import-untyped]
+            NoTranscriptFound,
+            TooManyRequests,
+            TranscriptsDisabled,
+            VideoUnavailable,
+        )
 
         api = YouTubeTranscriptApi()
         transcript_list = api.list(video_id)
@@ -52,12 +85,19 @@ def _fetch_transcript_sync(video_id: str) -> str | None:
 
         fetched = transcript.fetch()
         return " ".join(snippet.text for snippet in fetched)
-    except Exception:
-        return None
+    except (TranscriptsDisabled, VideoUnavailable, TooManyRequests, NoTranscriptFound) as e:
+        raise YouTubeTranscriptError(_get_transcript_error_message(e), e) from e
+    except Exception as e:
+        raise YouTubeTranscriptError(_get_transcript_error_message(e), e) from e
 
 
-async def get_transcript(video_id: str) -> str | None:
-    """Fetch and join all transcript segments for a YouTube video (async wrapper)."""
+async def get_transcript(video_id: str) -> str:
+    """Fetch and join all transcript segments for a YouTube video (async wrapper).
+
+    Raises:
+        YouTubeTranscriptError: If transcript fetch fails.
+        TimeoutError: If transcript fetch times out.
+    """
     loop = asyncio.get_running_loop()
     try:
         transcript = await asyncio.wait_for(
@@ -65,10 +105,7 @@ async def get_transcript(video_id: str) -> str | None:
             timeout=_TRANSCRIPT_TIMEOUT_SECONDS,
         )
     except TimeoutError:
-        return None
-
-    if not transcript:
-        return None
+        raise YouTubeTranscriptError("Transcript fetch timed out. Please try again.") from None
 
     return transcript[:_MAX_TRANSCRIPT_CHARS]
 
@@ -81,7 +118,8 @@ async def get_video_context(url: str) -> tuple[str, str | None]:
         "{title}\\n\\n{transcript}".
 
     Raises:
-        ValueError: For invalid URLs or videos with no available transcript.
+        ValueError: For invalid URLs.
+        YouTubeTranscriptError: For transcript-related errors.
     """
     video_id = extract_video_id(url)
     if not video_id:
@@ -95,10 +133,14 @@ async def get_video_context(url: str) -> tuple[str, str | None]:
     except Exception:
         metadata = {}
 
+    # Let YouTubeTranscriptError propagate with its user-friendly message
     transcript = await transcript_task
 
-    if not transcript:
-        raise ValueError("No transcript found for this video. Please try a video with captions enabled.")
+    if len(transcript) < _MIN_TRANSCRIPT_CHARS:
+        raise ValueError(
+            f"Video transcript is too short ({len(transcript)} characters) to extract a recipe. "
+            "Please try a video with more content."
+        )
 
     title = metadata.get("title", "")
     thumbnail_url = metadata.get("thumbnail_url")
