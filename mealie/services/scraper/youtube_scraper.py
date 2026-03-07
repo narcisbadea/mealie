@@ -21,8 +21,15 @@ logger = logging.getLogger(__name__)
 
 _TRANSCRIPT_TIMEOUT_SECONDS = 20
 _MAX_TRANSCRIPT_CHARS = 12000
+_MIN_TRANSCRIPT_CHARS = 100
 _AUDIO_DOWNLOAD_TIMEOUT = 120
 _WHISPER_TIMEOUT = 180
+
+
+class YouTubeTranscriptError(Exception):
+    """Raised when transcript extraction fails for a YouTube video."""
+
+    pass
 
 _VIDEO_ID_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
 
@@ -300,6 +307,9 @@ async def get_video_context(url: str) -> tuple[str, str | None]:
 
     if not transcript:
         raise ValueError("No transcript found for this video. Please try a video with captions enabled.")
+
+    if len(transcript) < _MIN_TRANSCRIPT_CHARS:
+        raise ValueError("Transcript is too short. Please try a video with more content.")
 
     title = metadata.get("title", "")
     thumbnail_url = metadata.get("thumbnail_url")
