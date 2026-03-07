@@ -9,7 +9,7 @@ from mealie.services.scraper.scraped_extras import ScrapedExtras
 from .scraper_strategies import (
     ABCScraperStrategy,
     RecipeScraperOpenAI,
-    RecipeScraperOpenAIDirect,
+    RecipeScraperOpenAIDirect,  # noqa: F401 - re-exported for use in scraper.py
     RecipeScraperOpenGraph,
     RecipeScraperPackage,
     safe_scrape_html,

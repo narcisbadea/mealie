@@ -19,9 +19,7 @@ ROOT = Path(__file__).parent.parent
 PROMPT_FILE = ROOT / "mealie/services/openai/prompts/recipes/parse-recipe-text.txt"
 DEFAULT_URL = "https://www.youtube.com/watch?v=GoNDvwneVVQ&t=3s"
 
-_VIDEO_ID_RE = re.compile(
-    r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})"
-)
+_VIDEO_ID_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
 
 
 def extract_video_id(url: str) -> str | None:
@@ -31,6 +29,7 @@ def extract_video_id(url: str) -> str | None:
 
 async def get_video_metadata(url: str) -> dict:
     import httpx
+
     oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(oembed_url)

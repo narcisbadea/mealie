@@ -32,7 +32,7 @@ def test_openai_create_recipe_from_tiktok(
             total_time=random_string(),
             prep_time=random_string(),
             perform_time=random_string(),
-            ingredients=[OpenAIRecipeIngredient(text=random_string()) for _ in range(random_int(5, 10))],
+            ingredients=[OpenAIRecipeIngredient(original_text=random_string()) for _ in range(random_int(5, 10))],
             instructions=[OpenAIRecipeInstruction(text=random_string()) for _ in range(1, random_int(5, 10))],
             notes=[OpenAIRecipeNotes(text=random_string()) for _ in range(random_int(2, 5))],
         )

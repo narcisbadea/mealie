@@ -196,8 +196,10 @@ class OpenAIService(BaseService):
         client = self.get_client()
         # Add JSON instruction to the system prompt if not present
         if messages and messages[0].get("role") == "system":
-            messages[0]["content"] += "\n\nYou MUST return your answer in strictly valid JSON format that matches the required schema."
-            
+            messages[0]["content"] += (
+                "\n\nYou MUST return your answer in strictly valid JSON format that matches the required schema."
+            )
+
         return await client.chat.completions.create(
             messages=messages,
             model=self.model,
@@ -255,20 +257,27 @@ class OpenAIService(BaseService):
                 last_error = e
                 if attempt < max_retries:
                     self.logger.warning(
-                        f"OpenAI response parse failed (attempt {attempt + 1}/{max_retries + 1}): {e}. Retrying with correction..."
+                        f"OpenAI response parse failed (attempt {attempt + 1}/{max_retries + 1}): "
+                        f"{e}. Retrying with correction..."
                     )
                     messages.append({"role": "assistant", "content": response_text or ""})
                     messages.append(
                         {
                             "role": "user",
                             "content": (
-                                "Your previous response could not be parsed as valid JSON matching the required schema. "
+                                "Your previous response could not be parsed as valid JSON matching "
+                                "the required schema. "
                                 f"Parse error: {e}. "
                                 "Please return a valid JSON response that exactly matches the required schema."
                             ),
                         }
                     )
 
+        # Include truncated response content for debugging
+        truncated_response = (
+            (response_text[:500] + "...") if response_text and len(response_text) > 500 else (response_text or "empty")
+        )
         raise Exception(
-            f"OpenAI Request Failed. Response could not be parsed after {max_retries + 1} attempts: {last_error}"
+            f"OpenAI Request Failed. Response could not be parsed after {max_retries + 1} attempts: {last_error}. "
+            f"Response content (truncated): {truncated_response}"
         ) from last_error
