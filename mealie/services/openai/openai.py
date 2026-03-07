@@ -196,8 +196,10 @@ class OpenAIService(BaseService):
         client = self.get_client()
         # Add JSON instruction to the system prompt if not present
         if messages and messages[0].get("role") == "system":
-            messages[0]["content"] += "\n\nYou MUST return your answer in strictly valid JSON format that matches the required schema."
-            
+            messages[0]["content"] += (
+                "\n\nYou MUST return your answer in strictly valid JSON format that matches the required schema."
+            )
+
         return await client.chat.completions.create(
             messages=messages,
             model=self.model,
