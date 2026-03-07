@@ -209,13 +209,13 @@ def _transcribe_audio_sync(audio_path: str) -> str | None:
     try:
         settings = get_app_settings()
 
-        if not settings.openai_api_key:
+        if not settings.OPENAI_API_KEY:
             logger.warning("OpenAI API key not configured, cannot transcribe audio")
             return None
 
         client = OpenAI(
-            api_key=settings.openai_api_key,
-            base_url=settings.openai_base_url,
+            api_key=settings.OPENAI_API_KEY,
+            base_url=settings.OPENAI_BASE_URL,
         )
 
         with open(audio_path, "rb") as audio_file:
