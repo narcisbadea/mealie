@@ -16,74 +16,14 @@
       absolute
       :top-link="topLinks"
       :secondary-links="cookbookLinks || []"
-    >
-      <v-menu
-        offset-y
-        nudge-bottom="5"
-        close-delay="50"
-        nudge-right="15"
-      >
-        <template #activator="{ props }">
-          <v-btn
-            v-if="isOwnGroup"
-            rounded
-            size="large"
-            class="ml-2 mt-3"
-            v-bind="props"
-            variant="elevated"
-            elevation="2"
-            :color="$vuetify.theme.current.dark ? 'background-lighten-1' : 'background-darken-1'"
-          >
-            <v-icon
-              start
-              size="large"
-              color="primary"
-            >
-              {{ $globals.icons.createAlt }}
-            </v-icon>
-            {{ $t("general.create") }}
-          </v-btn>
-        </template>
-        <v-list
-          density="comfortable"
-          class="mb-0 mt-1 py-0"
-          variant="flat"
-        >
-          <template v-for="(item, index) in createLinks">
-            <div
-              v-if="!item.hide"
-              :key="item.title"
-            >
-              <v-divider
-                v-if="item.insertDivider"
-                :key="index"
-                class="mx-2"
-              />
-              <v-list-item
-                v-if="!item.restricted || isOwnGroup"
-                :key="item.title"
-                :to="item.to"
-                exact
-                class="my-1"
-              >
-                <template #prepend>
-                  <v-icon
-                    size="40"
-                    :icon="item.icon"
-                  />
-                </template>
-                <v-list-item-title class="font-weight-medium" style="font-size: small;">
-                  {{ item.title }}
-                </v-list-item-title>
-                <v-list-item-subtitle class="font-weight-medium" style="font-size: small;">
-                  {{ item.subtitle }}
-                </v-list-item-subtitle>
-              </v-list-item>
-            </div>
-          </template>
-        </v-list>
-      </v-menu>
-    </AppSidebar>
+    />
+
+    <!-- Contextual FAB for recipe pages -->
+    <RecipeCreateFab
+      v-if="showCreateFab && groupSlug"
+      :group-slug="groupSlug"
+    />
+
     <v-main class="pt-12">
       <v-scroll-x-transition>
         <div>
@@ -100,17 +40,40 @@ import type { SideBarLink } from "~/types/application-types";
 import { useCookbookPreferences } from "~/composables/use-users/preferences";
 import { useCookbookStore, usePublicCookbookStore } from "~/composables/store/use-cookbook-store";
 import type { ReadCookBook } from "~/lib/api/types/cookbook";
+import RecipeCreateFab from "./LayoutParts/RecipeCreateFab.vue";
 
 export default defineNuxtComponent({
+  components: { RecipeCreateFab },
   setup() {
     const i18n = useI18n();
-    const { $appInfo, $globals } = useNuxtApp();
+    const { $globals } = useNuxtApp();
     const display = useDisplay();
     const auth = useMealieAuth();
     const { isOwnGroup } = useLoggedInState();
 
     const route = useRoute();
     const groupSlug = computed(() => route.params.groupSlug as string || auth.user.value?.groupSlug || "");
+
+    // Show FAB only on recipe-related pages
+    const showCreateFab = computed(() => {
+      const path = route.path;
+      // Show on main recipes page, recipe finder, categories, tags, tools, cookbooks
+      const recipePages = [
+        /^\/g\/[^/]+$/, // Main recipes page
+        /^\/g\/[^/]+\/recipes/, // Recipe subpages (finder, categories, tags, tools, timeline)
+        /^\/g\/[^/]+\/cookbooks/, // Cookbooks pages
+      ];
+      // Don't show on create pages themselves or recipe view pages
+      const excludedPages = [
+        /\/r\/create/, // Create pages
+        /\/r\/[^/]+$/, // Recipe view page (slug only)
+      ];
+
+      const isRecipePage = recipePages.some(regex => regex.test(path));
+      const isExcluded = excludedPages.some(regex => regex.test(path));
+
+      return isOwnGroup.value && isRecipePage && !isExcluded;
+    });
 
     const cookbookPreferences = useCookbookPreferences();
     const ownCookbookStore = useCookbookStore(i18n);
@@ -133,9 +96,6 @@ export default defineNuxtComponent({
       }
       return [];
     });
-
-    const showImageImport = computed(() => $appInfo.enableOpenaiImageServices);
-    const languageDialog = ref<boolean>(false);
 
     const sidebar = ref<boolean>(false);
     onMounted(() => {
@@ -195,63 +155,6 @@ export default defineNuxtComponent({
       }
     });
 
-    const createLinks = computed(() => [
-      {
-        insertDivider: false,
-        icon: $globals.icons.link,
-        title: i18n.t("general.import"),
-        subtitle: i18n.t("new-recipe.import-by-url"),
-        to: `/g/${groupSlug.value}/r/create/url`,
-        restricted: true,
-        hide: false,
-      },
-      {
-        insertDivider: false,
-        icon: $globals.icons.robot,
-        title: i18n.t("recipe.ai-tab-text"),
-        subtitle: i18n.t("recipe.ai-text-description"),
-        to: `/g/${groupSlug.value}/r/create/text`,
-        restricted: true,
-        hide: !$appInfo.enableOpenai,
-      },
-      {
-        insertDivider: false,
-        icon: $globals.icons.video,
-        title: i18n.t("recipe.ai-tab-youtube"),
-        subtitle: i18n.t("recipe.ai-youtube-description"),
-        to: `/g/${groupSlug.value}/r/create/youtube`,
-        restricted: true,
-        hide: !$appInfo.enableOpenai,
-      },
-      {
-        insertDivider: false,
-        icon: $globals.icons.video,
-        title: i18n.t("recipe.ai-tab-tiktok"),
-        subtitle: i18n.t("recipe.ai-tiktok-description"),
-        to: `/g/${groupSlug.value}/r/create/tiktok`,
-        restricted: true,
-        hide: !$appInfo.enableOpenai,
-      },
-      {
-        insertDivider: false,
-        icon: $globals.icons.fileImage,
-        title: i18n.t("recipe.create-from-images"),
-        subtitle: i18n.t("recipe.create-recipe-from-an-image"),
-        to: `/g/${groupSlug.value}/r/create/image`,
-        restricted: true,
-        hide: !showImageImport.value,
-      },
-      {
-        insertDivider: true,
-        icon: $globals.icons.edit,
-        title: i18n.t("general.create"),
-        subtitle: i18n.t("new-recipe.create-manually"),
-        to: `/g/${groupSlug.value}/r/create/new`,
-        restricted: true,
-        hide: false,
-      },
-    ]);
-
     const topLinks = computed<SideBarLink[]>(() => [
       {
         icon: $globals.icons.silverwareForkKnife,
@@ -278,22 +181,23 @@ export default defineNuxtComponent({
         restricted: true,
       },
       {
-        icon: $globals.icons.timelineText,
-        title: i18n.t("recipe.timeline"),
-        to: `/g/${groupSlug.value}/recipes/timeline`,
-        restricted: true,
-      },
-      {
         icon: $globals.icons.book,
         to: `/g/${groupSlug.value}/cookbooks`,
         title: i18n.t("cookbook.cookbooks"),
         restricted: true,
       },
       {
-        icon: $globals.icons.organizers,
-        title: i18n.t("general.organizers"),
+        icon: $globals.icons.folderOutline,
+        title: i18n.t("general.organize"),
         restricted: true,
+        childrenStartExpanded: false,
         children: [
+          {
+            icon: $globals.icons.timelineText,
+            title: i18n.t("recipe.timeline"),
+            to: `/g/${groupSlug.value}/recipes/timeline`,
+            restricted: true,
+          },
           {
             icon: $globals.icons.categories,
             to: `/g/${groupSlug.value}/recipes/categories`,
@@ -319,10 +223,9 @@ export default defineNuxtComponent({
     return {
       groupSlug,
       cookbookLinks,
-      createLinks,
       topLinks,
       isOwnGroup,
-      languageDialog,
+      showCreateFab,
       sidebar,
     };
   },

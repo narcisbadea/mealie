@@ -30,6 +30,7 @@ from mealie.routes._base import controller
 from mealie.routes._base.routers import MealieCrudRoute, UserAPIRouter
 from mealie.schema.cookbook.cookbook import ReadCookBook
 from mealie.schema.make_dependable import make_dependable
+from mealie.schema.openai import RecipeEnhanceRequest, RecipeEnhanceResponse
 from mealie.schema.recipe import Recipe, ScrapeRecipe, ScrapeRecipeData, ScrapeRecipeText
 from mealie.schema.recipe.recipe import (
     CreateRecipe,
@@ -281,9 +282,9 @@ class RecipeController(BaseRecipeController):
 
         return recipe.slug
 
-    @router.post("/create/youtube", status_code=201)
-    async def create_recipe_from_youtube(self, req: ScrapeRecipeYouTube):
-        """Create a recipe from a YouTube video URL using OpenAI."""
+    @router.post("/create/youtube", status_code=202)
+    async def create_recipe_from_youtube(self, req: ScrapeRecipeYouTube, bg_tasks: BackgroundTasks):
+        """Create a recipe from a YouTube video URL using OpenAI. Runs asynchronously."""
 
         if not self.settings.OPENAI_ENABLED:
             raise HTTPException(
@@ -291,28 +292,19 @@ class RecipeController(BaseRecipeController):
                 detail=ErrorResponse.respond("OpenAI is not enabled"),
             )
 
-        try:
-            recipe = await self.service.create_from_youtube(req.url)
-        except (ValueError, Exception) as e:
-            raise HTTPException(status_code=400, detail=ErrorResponse.respond(str(e))) from e
+        from mealie.services.scraper.video_import_scraper import VideoImportScraperService
 
-        self.publish_event(
-            event_type=EventTypes.recipe_created,
-            document_data=EventRecipeData(operation=EventOperation.create, recipe_slug=recipe.slug),
-            group_id=recipe.group_id,
-            household_id=recipe.household_id,
-            message=self.t(
-                "notifications.generic-created-with-url",
-                name=recipe.name,
-                url=urls.recipe_url(self.group.slug, recipe.slug, self.settings.BASE_URL),
-            ),
+        video_import_service = VideoImportScraperService(
+            self.service, self.repos, self.user, self.group, self.translator
         )
+        report_id = video_import_service.get_report_id("YouTube", req.url)
+        bg_tasks.add_task(video_import_service.scrape_youtube, req)
 
-        return recipe.slug
+        return {"reportId": str(report_id)}
 
-    @router.post("/create/tiktok", status_code=201)
-    async def create_recipe_from_tiktok(self, req: ScrapeRecipeTikTok):
-        """Create a recipe from a TikTok video URL using OpenAI."""
+    @router.post("/create/tiktok", status_code=202)
+    async def create_recipe_from_tiktok(self, req: ScrapeRecipeTikTok, bg_tasks: BackgroundTasks):
+        """Create a recipe from a TikTok video URL using OpenAI. Runs asynchronously."""
 
         if not self.settings.OPENAI_ENABLED:
             raise HTTPException(
@@ -320,24 +312,15 @@ class RecipeController(BaseRecipeController):
                 detail=ErrorResponse.respond("OpenAI is not enabled"),
             )
 
-        try:
-            recipe = await self.service.create_from_tiktok(req.url)
-        except (ValueError, Exception) as e:
-            raise HTTPException(status_code=400, detail=ErrorResponse.respond(str(e))) from e
+        from mealie.services.scraper.video_import_scraper import VideoImportScraperService
 
-        self.publish_event(
-            event_type=EventTypes.recipe_created,
-            document_data=EventRecipeData(operation=EventOperation.create, recipe_slug=recipe.slug),
-            group_id=recipe.group_id,
-            household_id=recipe.household_id,
-            message=self.t(
-                "notifications.generic-created-with-url",
-                name=recipe.name,
-                url=urls.recipe_url(self.group.slug, recipe.slug, self.settings.BASE_URL),
-            ),
+        video_import_service = VideoImportScraperService(
+            self.service, self.repos, self.user, self.group, self.translator
         )
+        report_id = video_import_service.get_report_id("TikTok", req.url)
+        bg_tasks.add_task(video_import_service.scrape_tiktok, req)
 
-        return recipe.slug
+        return {"reportId": str(report_id)}
 
     # ==================================================================================================================
     # CRUD Operations
@@ -612,6 +595,74 @@ class RecipeController(BaseRecipeController):
             )
 
         return recipe
+
+    # ==================================================================================================================
+    # AI Enhancement
+
+    @router.post("/{slug}/enhance", response_model=RecipeEnhanceResponse)
+    async def enhance_recipe(self, slug: str, request: RecipeEnhanceRequest):
+        """
+        Enhance a recipe using AI. Supports:
+        - Portion scaling
+        - Dietary substitutions
+        - Unit conversion
+        - Allergy accommodations
+        """
+        if not self.settings.OPENAI_ENABLED:
+            raise HTTPException(
+                status_code=400,
+                detail=ErrorResponse.respond("OpenAI is not enabled"),
+            )
+
+        recipe = self.service.get_one(slug)
+
+        # Prepare recipe data for AI
+        recipe_data = {
+            "name": recipe.name,
+            "description": recipe.description,
+            "recipe_yield": recipe.recipe_yield,
+            "recipe_ingredient": [
+                {
+                    "quantity": ing.quantity,
+                    "unit": ing.unit,
+                    "food": ing.food,
+                    "note": ing.note,
+                    "original_text": ing.original_text,
+                }
+                for ing in recipe.recipe_ingredient
+            ],
+            "recipe_instructions": [
+                {
+                    "text": step.text,
+                    "title": step.title,
+                    "summary": step.summary,
+                }
+                for step in recipe.recipe_instructions or []
+            ],
+            "notes": [note.text for note in recipe.notes] if recipe.notes else [],
+        }
+
+        try:
+            from mealie.services.openai.openai import OpenAIService
+
+            openai_service = OpenAIService()
+            result = await openai_service.enhance_recipe(recipe_data, request)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=ErrorResponse.respond(str(e))) from e
+        except Exception as e:
+            self.logger.error(f"Failed to enhance recipe: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=ErrorResponse.respond("Failed to enhance recipe"),
+            ) from e
+
+        if result is None:
+            raise HTTPException(
+                status_code=500,
+                detail=ErrorResponse.respond("Failed to enhance recipe - no response from AI"),
+            )
+
+        return result
 
     # ==================================================================================================================
     # Image and Assets

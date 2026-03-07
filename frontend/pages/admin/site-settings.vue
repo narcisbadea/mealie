@@ -157,6 +157,61 @@
       </v-alert>
     </section>
 
+    <!-- LLM Model Selection -->
+    <section v-if="appConfig.enableOpenai">
+      <BaseCardSectionTitle
+        class="pt-2"
+        :icon="$globals.icons.robot"
+        :title="$t('admin.llm-model-settings')"
+      />
+      <v-alert
+        border="start"
+        border-color="info"
+        variant="text"
+        elevation="2"
+      >
+        <template #prepend>
+          <v-icon color="info">
+            {{ $globals.icons.robot }}
+          </v-icon>
+        </template>
+        <div class="font-weight-medium">
+          {{ $t('admin.llm-model-description') }}
+        </div>
+        <div class="mt-4">
+          <v-select
+            v-model="selectedModel"
+            :items="modelOptions"
+            :label="$t('admin.select-model')"
+            :loading="loadingModels"
+            :disabled="loadingModels || models.length === 0"
+            variant="outlined"
+            clearable
+            :hint="$t('admin.model-selection-hint')"
+            persistent-hint
+            class="mb-2"
+          />
+          <div class="d-flex gap-2">
+            <BaseButton
+              color="primary"
+              :disabled="!selectedModel || selectedModel === currentModel"
+              :loading="savingModel"
+              @click="saveModel"
+            >
+              {{ $t('general.save') }}
+            </BaseButton>
+            <BaseButton
+              color="secondary"
+              :disabled="!currentModel"
+              @click="resetModel"
+            >
+              {{ $t('general.reset') }}
+            </BaseButton>
+          </div>
+        </div>
+      </v-alert>
+    </section>
+
     <!-- General App Info -->
     <section class="mt-4">
       <BaseCardSectionTitle
@@ -231,7 +286,7 @@ import type { TranslateResult } from "vue-i18n";
 import { useAdminApi, useUserApi } from "~/composables/api";
 import { validators } from "~/composables/use-validators";
 import { useAsyncKey } from "~/composables/use-utils";
-import type { CheckAppConfig } from "~/lib/api/types/admin";
+import type { CheckAppConfig, LLMModel } from "~/lib/api/types/admin";
 import AppLoader from "~/components/global/AppLoader.vue";
 
 enum DockerVolumeState {
@@ -278,6 +333,13 @@ export default defineNuxtComponent({
       tested: false,
     });
 
+    // LLM Model selection state
+    const models = ref<LLMModel[]>([]);
+    const selectedModel = ref<string | null>(null);
+    const currentModel = ref<string | null>(null);
+    const loadingModels = ref(false);
+    const savingModel = ref(false);
+
     // Set page title
     useSeoMeta({
       title: i18n.t("settings.site-settings"),
@@ -303,7 +365,70 @@ export default defineNuxtComponent({
         appConfig.value = { ...data, isSiteSecure: false };
       }
       appConfig.value.isSiteSecure = isLocalHostOrHttps();
+
+      // Load available models if OpenAI is enabled
+      if (appConfig.value.enableOpenai) {
+        await loadModels();
+      }
     });
+
+    // LLM Model functions
+    async function loadModels() {
+      loadingModels.value = true;
+      try {
+        const { data } = await adminApi.about.getAvailableModels();
+        if (data) {
+          models.value = data.models;
+          currentModel.value = data.currentModel;
+          selectedModel.value = data.currentModel;
+        }
+      }
+      catch (e) {
+        console.error("Failed to load models:", e);
+      }
+      finally {
+        loadingModels.value = false;
+      }
+    }
+
+    const modelOptions = computed(() => {
+      return models.value.map(model => ({
+        title: model.name,
+        value: model.id,
+      }));
+    });
+
+    async function saveModel() {
+      if (!selectedModel.value) return;
+      savingModel.value = true;
+      try {
+        await adminApi.about.setLLMModel(selectedModel.value);
+        currentModel.value = selectedModel.value;
+      }
+      catch (e) {
+        console.error("Failed to save model:", e);
+      }
+      finally {
+        savingModel.value = false;
+      }
+    }
+
+    async function resetModel() {
+      savingModel.value = true;
+      try {
+        await adminApi.about.resetLLMModel();
+        selectedModel.value = null;
+        currentModel.value = null;
+        // Reload to get the default model
+        await loadModels();
+      }
+      catch (e) {
+        console.error("Failed to reset model:", e);
+      }
+      finally {
+        savingModel.value = false;
+      }
+    }
     const simpleChecks = computed<SimpleCheck[]>(() => {
       const goodIcon = $globals.icons.checkboxMarkedCircle;
       const badIcon = $globals.icons.alert;
@@ -515,6 +640,15 @@ export default defineNuxtComponent({
       ...toRefs(state),
       testEmail,
       appInfo,
+      // LLM Model selection
+      models,
+      selectedModel,
+      currentModel,
+      loadingModels,
+      savingModel,
+      modelOptions,
+      saveModel,
+      resetModel,
     };
   },
 });

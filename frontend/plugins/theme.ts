@@ -48,9 +48,9 @@ export default defineNuxtPlugin(async (nuxtApp) => {
         light: {
           dark: false,
           colors: {
-            primary: theme?.lightPrimary ?? "#E58325",
-            accent: theme?.lightAccent ?? "#007A99",
-            secondary: theme?.lightSecondary ?? "#973542",
+            primary: theme?.lightPrimary ?? "#228B22",
+            accent: theme?.lightAccent ?? "#2E7D32",
+            secondary: theme?.lightSecondary ?? "#1B5E20",
             success: theme?.lightSuccess ?? "#43A047",
             info: theme?.lightInfo ?? "#1976d2",
             warning: theme?.lightWarning ?? "#FF6D00",
@@ -60,9 +60,9 @@ export default defineNuxtPlugin(async (nuxtApp) => {
         dark: {
           dark: true,
           colors: {
-            primary: theme?.darkPrimary ?? "#E58325",
-            accent: theme?.darkAccent ?? "#007A99",
-            secondary: theme?.darkSecondary ?? "#973542",
+            primary: theme?.darkPrimary ?? "#4CAF50",
+            accent: theme?.darkAccent ?? "#66BB6A",
+            secondary: theme?.darkSecondary ?? "#2E7D32",
             success: theme?.darkSuccess ?? "#43A047",
             info: theme?.darkInfo ?? "#1976d2",
             warning: theme?.darkWarning ?? "#FF6D00",

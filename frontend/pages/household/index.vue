@@ -17,31 +17,63 @@
       </template>
       {{ $t("profile.household-description") }}
     </BasePageTitle>
-    <v-form ref="refHouseholdEditForm" @submit.prevent="handleSubmit">
-      <v-card variant="outlined" style="border-color: lightgray;">
-        <v-card-text>
-          <HouseholdPreferencesEditor v-if="household.preferences" v-model="household.preferences" />
-        </v-card-text>
-      </v-card>
-      <div class="d-flex pa-2">
-        <BaseButton type="submit" edit class="ml-auto">
-          {{ $t("general.update") }}
-        </BaseButton>
-      </div>
-    </v-form>
+
+    <!-- Tabbed Interface for Household Settings -->
+    <v-card variant="outlined" style="border-color: lightgray;">
+      <v-tabs v-model="activeTab" color="primary" class="border-b">
+        <v-tab value="general">
+          {{ $t('general.general') }}
+        </v-tab>
+        <v-tab value="members">
+          {{ $t('profile.members') }}
+        </v-tab>
+        <v-tab value="notifications">
+          {{ $t('profile.notifiers') }}
+        </v-tab>
+      </v-tabs>
+
+      <v-card-text>
+        <v-window v-model="activeTab">
+          <!-- General Tab -->
+          <v-window-item value="general">
+            <v-form ref="refHouseholdEditForm" @submit.prevent="handleSubmit">
+              <HouseholdPreferencesEditor v-if="household.preferences" v-model="household.preferences" />
+              <div class="d-flex pa-2">
+                <BaseButton type="submit" edit class="ml-auto">
+                  {{ $t("general.update") }}
+                </BaseButton>
+              </div>
+            </v-form>
+          </v-window-item>
+
+          <!-- Members Tab -->
+          <v-window-item value="members">
+            <HouseholdMembersTab />
+          </v-window-item>
+
+          <!-- Notifications Tab -->
+          <v-window-item value="notifications">
+            <HouseholdNotificationsTab />
+          </v-window-item>
+        </v-window>
+      </v-card-text>
+    </v-card>
   </v-container>
 </template>
 
 <script lang="ts">
 import HouseholdPreferencesEditor from "~/components/Domain/Household/HouseholdPreferencesEditor.vue";
+import HouseholdMembersTab from "./members-tab.vue";
+import HouseholdNotificationsTab from "./notifications-tab.vue";
 import { useHouseholdSelf } from "~/composables/use-households";
-import type { ReadHouseholdPreferences } from "~/lib/api/types/household";
 import { alert } from "~/composables/use-toast";
 import type { VForm } from "~/types/auto-forms";
 
 export default defineNuxtComponent({
   components: {
     HouseholdPreferencesEditor,
+    HouseholdMembersTab,
+    HouseholdNotificationsTab,
   },
   middleware: ["can-manage-household-only"],
   setup() {
@@ -53,86 +85,10 @@ export default defineNuxtComponent({
     });
 
     const refHouseholdEditForm = ref<VForm | null>(null);
-
-    type Preference = {
-      key: keyof ReadHouseholdPreferences;
-      value: boolean;
-      label: string;
-      description: string;
-    };
-
-    const preferencesEditor = computed<Preference[]>(() => {
-      if (!household.value || !household.value.preferences) {
-        return [];
-      }
-      return [
-        {
-          key: "recipePublic",
-          value: household.value.preferences.recipePublic || false,
-          label: i18n.t("household.allow-users-outside-of-your-household-to-see-your-recipes"),
-          description: i18n.t("household.allow-users-outside-of-your-household-to-see-your-recipes-description"),
-        } as Preference,
-        {
-          key: "recipeShowNutrition",
-          value: household.value.preferences.recipeShowNutrition || false,
-          label: i18n.t("group.show-nutrition-information"),
-          description: i18n.t("group.show-nutrition-information-description"),
-        } as Preference,
-        {
-          key: "recipeShowAssets",
-          value: household.value.preferences.recipeShowAssets || false,
-          label: i18n.t("group.show-recipe-assets"),
-          description: i18n.t("group.show-recipe-assets-description"),
-        } as Preference,
-        {
-          key: "recipeLandscapeView",
-          value: household.value.preferences.recipeLandscapeView || false,
-          label: i18n.t("group.default-to-landscape-view"),
-          description: i18n.t("group.default-to-landscape-view-description"),
-        } as Preference,
-        {
-          key: "recipeDisableComments",
-          value: household.value.preferences.recipeDisableComments || false,
-          label: i18n.t("group.disable-users-from-commenting-on-recipes"),
-          description: i18n.t("group.disable-users-from-commenting-on-recipes-description"),
-        } as Preference,
-      ];
-    });
-
-    const allDays = [
-      {
-        name: i18n.t("general.sunday"),
-        value: 0,
-      },
-      {
-        name: i18n.t("general.monday"),
-        value: 1,
-      },
-      {
-        name: i18n.t("general.tuesday"),
-        value: 2,
-      },
-      {
-        name: i18n.t("general.wednesday"),
-        value: 3,
-      },
-      {
-        name: i18n.t("general.thursday"),
-        value: 4,
-      },
-      {
-        name: i18n.t("general.friday"),
-        value: 5,
-      },
-      {
-        name: i18n.t("general.saturday"),
-        value: 6,
-      },
-    ];
+    const activeTab = ref("general");
 
     async function handleSubmit() {
       if (!refHouseholdEditForm.value?.validate() || !household.value?.preferences) {
-        console.log(refHouseholdEditForm.value?.validate());
         return;
       }
 
@@ -148,10 +104,9 @@ export default defineNuxtComponent({
     return {
       household,
       householdActions,
-      allDays,
-      preferencesEditor,
       refHouseholdEditForm,
       handleSubmit,
+      activeTab,
     };
   },
 });

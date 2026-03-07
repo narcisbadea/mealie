@@ -35,6 +35,7 @@ from mealie.db.models.recipe.shared import RecipeShareTokenModel
 from mealie.db.models.recipe.tag import Tag
 from mealie.db.models.recipe.tool import Tool
 from mealie.db.models.users import LongLiveToken, User
+from mealie.db.models.users.in_app_notification import InAppNotificationModel
 from mealie.db.models.users.password_reset import PasswordResetModel
 from mealie.db.models.users.user_to_recipe import UserToRecipe
 from mealie.repos.repository_cookbooks import RepositoryCookbooks
@@ -68,6 +69,7 @@ from mealie.schema.recipe.recipe_share_token import RecipeShareToken
 from mealie.schema.recipe.recipe_timeline_events import RecipeTimelineEventOut
 from mealie.schema.reports.reports import ReportEntryOut, ReportOut
 from mealie.schema.user import GroupInDB, LongLiveTokenInDB, PrivateUser
+from mealie.schema.user.in_app_notification import InAppNotificationOut
 from mealie.schema.user.user import UserRatingOut
 from mealie.schema.user.user_passwords import PrivatePasswordResetToken
 
@@ -192,6 +194,12 @@ class AllRepositories:
     def tokens_pw_reset(self) -> GroupRepositoryGeneric[PrivatePasswordResetToken, PasswordResetModel]:
         return GroupRepositoryGeneric(
             self.session, PK_TOKEN, PasswordResetModel, PrivatePasswordResetToken, group_id=self.group_id
+        )
+
+    @cached_property
+    def in_app_notifications(self) -> GroupRepositoryGeneric[InAppNotificationOut, InAppNotificationModel]:
+        return GroupRepositoryGeneric(
+            self.session, PK_ID, InAppNotificationModel, InAppNotificationOut, group_id=self.group_id
         )
 
     # ================================================================

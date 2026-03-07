@@ -67,9 +67,9 @@ RUN uv build --out-dir dist
 # Create the requirements file, which is used to install the built package and
 # its pinned dependencies later. mealie is included to ensure the built one is
 # what's installed.
-RUN uv export --no-editable --no-emit-project --extra pgsql --format requirements-txt --output-file dist/requirements.txt \
+RUN uv export --no-editable --no-emit-project --extra pgsql --extra whisper --format requirements-txt --output-file dist/requirements.txt \
     && MEALIE_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])") \
-    && echo "mealie[pgsql]==${MEALIE_VERSION} \\" >> dist/requirements.txt \
+    && echo "mealie[pgsql,whisper]==${MEALIE_VERSION} \\" >> dist/requirements.txt \
     && pip hash dist/mealie-${MEALIE_VERSION}-py3-none-any.whl | tail -n1 | tr -d '\n' >> dist/requirements.txt \
     && echo " \\" >> dist/requirements.txt \
     && pip hash dist/mealie-${MEALIE_VERSION}.tar.gz | tail -n1 >> dist/requirements.txt
@@ -113,6 +113,7 @@ RUN . $VENV_PATH/bin/activate \
 FROM python-base AS production
 ENV PRODUCTION=true
 ENV TESTING=false
+ENV WHISPER_PROVIDER=faster-whisper
 
 ARG COMMIT
 ENV GIT_COMMIT_HASH=$COMMIT
@@ -123,6 +124,7 @@ RUN apt-get update \
     iproute2 \
     libldap-common \
     libldap2 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # create directory used for Docker Secrets

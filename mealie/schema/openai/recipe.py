@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from ._base import OpenAIBase
 
@@ -49,6 +49,14 @@ class OpenAIRecipeInstruction(OpenAIBase):
         ),
     )
 
+    @field_validator("text", mode="before")
+    @classmethod
+    def normalize_text(cls, v):
+        """Accept both string and dict formats."""
+        if isinstance(v, dict):
+            return v.get("text", "")
+        return v
+
 
 class OpenAIRecipeNotes(OpenAIBase):
     title: str | None = Field(
@@ -60,6 +68,14 @@ class OpenAIRecipeNotes(OpenAIBase):
         ...,
         description="The note content, such as tips, variations, or preparation advice.",
     )
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def normalize_text(cls, v):
+        """Accept both string and dict formats."""
+        if isinstance(v, dict):
+            return v.get("text", "")
+        return v
 
 
 class OpenAIRecipeNutrition(OpenAIBase):
@@ -126,3 +142,37 @@ class OpenAIRecipe(OpenAIBase):
         None,
         description="Nutritional information per serving, if available.",
     )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, v):
+        """Accept recipe_name as alias for name."""
+        return v
+
+    @field_validator("instructions", mode="before")
+    @classmethod
+    def normalize_instructions(cls, v):
+        """Convert string instructions to dict format."""
+        if not isinstance(v, list):
+            return []
+        result = []
+        for item in v:
+            if isinstance(item, str):
+                result.append({"text": item})
+            elif isinstance(item, dict):
+                result.append(item)
+        return result
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def normalize_notes(cls, v):
+        """Convert string notes to dict format."""
+        if not isinstance(v, list):
+            return []
+        result = []
+        for item in v:
+            if isinstance(item, str):
+                result.append({"text": item})
+            elif isinstance(item, dict):
+                result.append(item)
+        return result

@@ -16,6 +16,7 @@ import type {
   RecipeTimelineEventOut,
   RecipeTimelineEventUpdate,
 } from "~/lib/api/types/recipe";
+import type { RecipeEnhanceRequest, RecipeEnhanceResponse } from "~/lib/api/types/openai";
 import type { ApiRequestInstance, PaginationData } from "~/lib/api/types/non-generated";
 
 export type Parser = "nlp" | "brute" | "openai";
@@ -55,6 +56,7 @@ const routes = {
   recipesSlugCommentsId: (slug: string, id: number) => `${prefix}/recipes/${slug}/comments/${id}`,
 
   recipesSlugLastMade: (slug: string) => `${prefix}/recipes/${slug}/last-made`,
+  recipesSlugEnhance: (slug: string) => `${prefix}/recipes/${slug}/enhance`,
   recipesTimelineEventId: (id: string) => `${prefix}/recipes/timeline/events/${id}`,
   recipesTimelineEventIdImage: (id: string) => `${prefix}/recipes/timeline/events/${id}/image`,
 };
@@ -165,12 +167,12 @@ export class RecipeAPI extends BaseCRUDAPI<CreateRecipe, Recipe, Recipe> {
     return await this.requests.post<string>(routes.recipesCreateFromText, { text });
   }
 
-  async createOneFromYoutube(url: string) {
-    return await this.requests.post<string>(routes.recipesCreateFromYoutube, { url });
+  async createOneFromYoutube(url: string, targetLanguage?: string, correctGrammar: boolean = true) {
+    return await this.requests.post<{ reportId: string }>(routes.recipesCreateFromYoutube, { url, targetLanguage, correctGrammar });
   }
 
-  async createOneFromTiktok(url: string) {
-    return await this.requests.post<string>(routes.recipesCreateFromTiktok, { url });
+  async createOneFromTiktok(url: string, targetLanguage?: string, correctGrammar: boolean = true) {
+    return await this.requests.post<{ reportId: string }>(routes.recipesCreateFromTiktok, { url, targetLanguage, correctGrammar });
   }
 
   async createOneFromImages(fileObjects: (Blob | File)[], translateLanguage: string | null = null) {
@@ -208,6 +210,10 @@ export class RecipeAPI extends BaseCRUDAPI<CreateRecipe, Recipe, Recipe> {
 
   async updateLastMade(recipeSlug: string, timestamp: string) {
     return await this.requests.patch<Recipe, RecipeLastMade>(routes.recipesSlugLastMade(recipeSlug), { timestamp });
+  }
+
+  async enhanceRecipe(recipeSlug: string, request: RecipeEnhanceRequest) {
+    return await this.requests.post<RecipeEnhanceResponse>(routes.recipesSlugEnhance(recipeSlug), request);
   }
 
   async createTimelineEvent(payload: RecipeTimelineEventIn) {

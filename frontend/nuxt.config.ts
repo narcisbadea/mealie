@@ -79,9 +79,9 @@ export default defineNuxtConfig({
       useDark: Boolean(process.env.THEME_USE_DARK) || false,
       themes: {
         dark: {
-          primary: process.env.THEME_DARK_PRIMARY || "#E58325",
-          accent: process.env.THEME_DARK_ACCENT || "#007A99",
-          secondary: process.env.THEME_DARK_SECONDARY || "#973542",
+          primary: process.env.THEME_DARK_PRIMARY || "#4CAF50",
+          accent: process.env.THEME_DARK_ACCENT || "#66BB6A",
+          secondary: process.env.THEME_DARK_SECONDARY || "#2E7D32",
           success: process.env.THEME_DARK_SUCCESS || "#43A047",
           info: process.env.THEME_DARK_INFO || "#1976d2",
           warning: process.env.THEME_DARK_WARNING || "#FF6D00",
@@ -89,9 +89,9 @@ export default defineNuxtConfig({
           background: "#1E1E1E",
         },
         light: {
-          primary: process.env.THEME_LIGHT_PRIMARY || "#E58325",
-          accent: process.env.THEME_LIGHT_ACCENT || "#007A99",
-          secondary: process.env.THEME_LIGHT_SECONDARY || "#973542",
+          primary: process.env.THEME_LIGHT_PRIMARY || "#228B22",
+          accent: process.env.THEME_LIGHT_ACCENT || "#2E7D32",
+          secondary: process.env.THEME_LIGHT_SECONDARY || "#1B5E20",
           success: process.env.THEME_LIGHT_SUCCESS || "#43A047",
           info: process.env.THEME_LIGHT_INFO || "#1976d2",
           warning: process.env.THEME_LIGHT_WARNING || "#FF6D00",
@@ -238,7 +238,7 @@ export default defineNuxtConfig({
       scope: "/",
       display: "standalone",
       background_color: "#FFFFFF",
-      theme_color: process.env.THEME_LIGHT_PRIMARY || "#E58325",
+      theme_color: process.env.THEME_LIGHT_PRIMARY || "#228B22",
       description: "Mealie is a recipe management and meal planning app",
       lang: "en",
       display_override: [

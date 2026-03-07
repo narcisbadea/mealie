@@ -81,6 +81,14 @@ export interface AppTheme {
   darkWarning?: string;
   darkError?: string;
 }
+export interface AvailableLLMModels {
+  models: LLMModel[];
+  currentModel: string;
+}
+export interface LLMModel {
+  id: string;
+  name: string;
+}
 export interface BackupOptions {
   recipes?: boolean;
   settings?: boolean;

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,13 +16,14 @@ from fastapi import UploadFile
 from mealie.core import exceptions
 from mealie.core.config import get_app_settings
 from mealie.core.dependencies.dependencies import get_temporary_path
+from mealie.core.root_logger import get_logger
 from mealie.lang.providers import Translator
 from mealie.pkgs import cache
 from mealie.repos.all_repositories import get_repositories
 from mealie.repos.repository_factory import AllRepositories
 from mealie.repos.repository_generic import RepositoryGeneric
 from mealie.schema.household.household import HouseholdInDB, HouseholdRecipeUpdate
-from mealie.schema.openai.recipe import OpenAIRecipe
+from mealie.schema.openai.recipe import OpenAIRecipe, OpenAIRecipeIngredient
 from mealie.schema.recipe.recipe import CreateRecipe, Recipe, create_recipe_slug
 from mealie.schema.recipe.recipe_ingredient import RecipeIngredient, SaveIngredientFood, SaveIngredientUnit
 from mealie.schema.recipe.recipe_notes import RecipeNote
@@ -37,6 +39,8 @@ from mealie.services.recipe.recipe_data_service import RecipeDataService
 from mealie.services.scraper import cleaner
 
 from .template_service import TemplateService
+
+logger = get_logger()
 
 
 class RecipeServiceBase(BaseService):
@@ -355,14 +359,26 @@ class RecipeService(RecipeServiceBase):
         recipe = self.create_one(recipe_data)
         return recipe
 
-    async def create_from_youtube(self, url: str) -> Recipe:
+    async def create_from_youtube(
+        self, url: str, target_language: str | None = None, correct_grammar: bool = True
+    ) -> Recipe:
         from mealie.services.scraper.youtube_scraper import get_video_context
 
         combined_text, thumbnail_url = await get_video_context(url)
 
         openai_service = OpenAIRecipeService(self.repos, self.user, self.household, self.translator)
-        recipe_data = await openai_service.build_recipe_from_text(combined_text)
+        recipe_data = await openai_service.build_recipe_from_video_transcript(
+            combined_text, target_language=target_language, correct_grammar=correct_grammar
+        )
         recipe_data = cleaner.clean(recipe_data, self.translator)
+
+        # Add video URL to notes
+        video_note = RecipeNote(title="Video Source", text=f"YouTube: {url}")
+        if recipe_data.notes:
+            recipe_data.notes.append(video_note)
+        else:
+            recipe_data.notes = [video_note]
+
         recipe = self.create_one(recipe_data)
 
         if thumbnail_url and recipe.id:
@@ -376,14 +392,26 @@ class RecipeService(RecipeServiceBase):
 
         return recipe
 
-    async def create_from_tiktok(self, url: str) -> Recipe:
+    async def create_from_tiktok(
+        self, url: str, target_language: str | None = None, correct_grammar: bool = True
+    ) -> Recipe:
         from mealie.services.scraper.tiktok_scraper import get_video_context
 
         combined_text, thumbnail_url = await get_video_context(url)
 
         openai_service = OpenAIRecipeService(self.repos, self.user, self.household, self.translator)
-        recipe_data = await openai_service.build_recipe_from_text(combined_text)
+        recipe_data = await openai_service.build_recipe_from_video_transcript(
+            combined_text, target_language=target_language, correct_grammar=correct_grammar
+        )
         recipe_data = cleaner.clean(recipe_data, self.translator)
+
+        # Add video URL to notes
+        video_note = RecipeNote(title="Video Source", text=f"TikTok: {url}")
+        if recipe_data.notes:
+            recipe_data.notes.append(video_note)
+        else:
+            recipe_data.notes = [video_note]
+
         recipe = self.create_one(recipe_data)
 
         if thumbnail_url and recipe.id:
@@ -641,11 +669,482 @@ class RecipeService(RecipeServiceBase):
 
 
 class OpenAIRecipeService(RecipeServiceBase):
+    # Common units of measurement that should NOT be treated as foods
+    KNOWN_UNITS = {
+        # Metric
+        "g",
+        "gram",
+        "grams",
+        "kg",
+        "kilogram",
+        "kilograms",
+        "mg",
+        "milligram",
+        "milligrams",
+        "ml",
+        "milliliter",
+        "milliliters",
+        "l",
+        "liter",
+        "liters",
+        "dl",
+        "cl",
+        # Imperial
+        "oz",
+        "ounce",
+        "ounces",
+        "lb",
+        "lbs",
+        "pound",
+        "pounds",
+        "cups",
+        "cup",
+        "tbsp",
+        "tablespoon",
+        "tablespoons",
+        "tsp",
+        "teaspoon",
+        "teaspoons",
+        "pint",
+        "pints",
+        "quart",
+        "quarts",
+        "gallon",
+        "gallons",
+        # Romanian units
+        "linguri",
+        "linguriță",
+        "lingurita",
+        "lingurițe",
+        "lingurite",
+        "căni",
+        "cani",
+        "cană",
+        "cana",
+        "pahare",
+        "pahar",
+        "mână",
+        "mana",
+        "mâini",
+        "maini",
+        "praf",
+        "bucată",
+        "bucata",
+        "bucăți",
+        "bucati",
+        "felie",
+        "felii",
+        # Italian units
+        "cucchiaio",
+        "cucchiaino",
+        "tazza",
+        # Spanish units
+        "cucharada",
+        "cucharadita",
+        "tazas",
+        # Generic
+        "piece",
+        "pieces",
+        "slice",
+        "slices",
+        "handful",
+        "pinch",
+        "drop",
+        "drops",
+        "clove",
+        "cloves",
+        "bunch",
+        "sprig",
+        "sprigs",
+        "stick",
+        "sticks",
+        "can",
+        "cans",
+        "package",
+        "packages",
+        "bag",
+        "bags",
+        "bottle",
+        "bottles",
+    }
+
+    # Common foods that should NOT be treated as units
+    KNOWN_FOODS = {
+        # Romanian foods
+        "ceapă",
+        "ceapa",
+        "cepe",
+        "usturoi",
+        "roșii",
+        "rosii",
+        "roșie",
+        "rosie",
+        "cartofi",
+        "cartof",
+        "carne",
+        "pui",
+        "porc",
+        "pește",
+        "peste",
+        "ulei",
+        "unt",
+        "lapte",
+        "brânză",
+        "branza",
+        "smântână",
+        "smantana",
+        "pătrunjel",
+        "patrunjel",
+        "mărar",
+        "marar",
+        "busuioc",
+        "cimbru",
+        "făină",
+        "faina",
+        "zahăr",
+        "zahar",
+        "orez",
+        "paste",
+        "sare",
+        "piper",
+        "condimente",
+        "ouă",
+        "oua",
+        "ou",
+        "cașcaval",
+        "cascaval",
+        "slănină",
+        "slanina",
+        "vărză",
+        "varza",
+        "morcovi",
+        "ardei",
+        "castraveți",
+        "castraveti",
+        "dovlecei",
+        "vinete",
+        "mazăre",
+        "mazare",
+        "fasole",
+        "linte",
+        "ciuperci",
+        # English foods
+        "onion",
+        "onions",
+        "garlic",
+        "tomato",
+        "tomatoes",
+        "potato",
+        "potatoes",
+        "chicken",
+        "beef",
+        "pork",
+        "fish",
+        "oil",
+        "butter",
+        "milk",
+        "cheese",
+        "cream",
+        "parsley",
+        "dill",
+        "basil",
+        "thyme",
+        "flour",
+        "sugar",
+        "rice",
+        "pasta",
+        "salt",
+        "pepper",
+        "spices",
+        "egg",
+        "eggs",
+        "bacon",
+        "cabbage",
+        "carrot",
+        "carrots",
+        "peppers",
+        "cucumber",
+        "cucumbers",
+        "zucchini",
+        "eggplant",
+        "peas",
+        "beans",
+        "lentils",
+        "mushrooms",
+        "mushroom",
+        "lemon",
+        "lemons",
+        "lime",
+        "limes",
+        "orange",
+        "oranges",
+        "apple",
+        "apples",
+        "banana",
+        "bananas",
+        # Italian foods
+        "cipolla",
+        "cipolle",
+        "aglio",
+        "pomodoro",
+        "pomodori",
+        # Spanish foods
+        "cebolla",
+        "cebollas",
+        "ajo",
+        "tomate",
+        "tomates",
+    }
+
+    def _validate_ingredient(self, ingredient: OpenAIRecipeIngredient) -> OpenAIRecipeIngredient:
+        """Validate and correct common parsing mistakes.
+
+        Common issues:
+        - unit/food swapped (e.g., unit="ceapă", food="roșie" instead of food="ceapă roșie")
+        - note missing preparation details
+        """
+        if not ingredient.unit or not ingredient.food:
+            return ingredient
+
+        unit_lower = ingredient.unit.lower().strip()
+        food_lower = ingredient.food.lower().strip()
+
+        # Check if unit looks like a food and food looks like a unit
+        unit_is_food = unit_lower in self.KNOWN_FOODS or any(
+            food in unit_lower for food in self.KNOWN_FOODS if len(food) > 3
+        )
+        food_is_unit = food_lower in self.KNOWN_UNITS
+
+        if unit_is_food and food_lower not in self.KNOWN_UNITS:
+            # Unit contains a food name - likely swapped
+            logger.warning(
+                f"Detected possible unit/food swap: unit='{ingredient.unit}', food='{ingredient.food}'. "
+                f"Unit appears to be a food item."
+            )
+            # Swap them
+            new_unit = ingredient.food if food_is_unit else None
+            new_food = ingredient.unit
+            # Add the old food to the note if it wasn't a unit
+            new_note = ingredient.note or ""
+            if not food_is_unit and ingredient.food:
+                prep_detail = ingredient.food
+                new_note = f"{prep_detail}, {new_note}".strip(", ")
+
+            return OpenAIRecipeIngredient(
+                title=ingredient.title,
+                quantity=ingredient.quantity,
+                unit=new_unit,
+                food=new_food,
+                note=new_note or None,
+                original_text=ingredient.original_text,
+            )
+
+        return ingredient
+
+    # Regex pattern to detect numeric-only strings (integers, decimals, fractions)
+    NUMERIC_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+)?(?:/[0-9]+)?$")
+
+    def _is_fragmented_ingredient(self, ingredient: OpenAIRecipeIngredient) -> bool:
+        """Detect if an ingredient is a fragmented single word that should be merged.
+
+        A fragmented ingredient typically has:
+        - Numeric-only food field (e.g., food="500")
+        - Unit word as food field (e.g., food="grams", food="cups")
+        - Single word that looks like it should be part of a larger ingredient
+
+        Returns:
+            True if the ingredient appears to be a fragment that should be merged.
+        """
+        if not ingredient.food:
+            return False
+
+        food_lower = ingredient.food.lower().strip()
+
+        # Single word check - fragments are typically single words
+        if " " in food_lower:
+            return False
+
+        # Check if food is numeric-only (e.g., "500", "2.5", "1/2")
+        if self.NUMERIC_PATTERN.match(food_lower):
+            return True
+
+        # Check if food is a known unit word (e.g., "grams", "cups", "g")
+        if food_lower in self.KNOWN_UNITS:
+            return True
+
+        return False
+
+    def _merge_fragmented_ingredients(self, ingredients: list[OpenAIRecipeIngredient]) -> list[OpenAIRecipeIngredient]:
+        """Merge consecutive fragmented ingredients into complete ingredients.
+
+        YouTube Shorts and similar short-form video content can produce fragmented
+        ingredients where "500 grams flour" becomes three separate ingredients:
+        - {quantity: null, unit: null, food: "500"}
+        - {quantity: null, unit: null, food: "grams"}
+        - {quantity: null, unit: null, food: "flour"}
+
+        This method detects and merges such fragments back into a single ingredient:
+        - {quantity: 500, unit: "grams", food: "flour"}
+
+        Args:
+            ingredients: List of potentially fragmented ingredients.
+
+        Returns:
+            List with fragmented ingredients merged into complete ingredients.
+        """
+        if not ingredients:
+            return ingredients
+
+        merged: list[OpenAIRecipeIngredient] = []
+        i = 0
+
+        while i < len(ingredients):
+            current = ingredients[i]
+
+            # Check if this is a fragmented ingredient (numeric or unit word)
+            if self._is_fragmented_ingredient(current):
+                # Look ahead to collect consecutive fragments
+                fragment_group = [current]
+                j = i + 1
+
+                # Collect consecutive fragments (numeric or unit words)
+                while j < len(ingredients) and self._is_fragmented_ingredient(ingredients[j]):
+                    fragment_group.append(ingredients[j])
+                    j += 1
+
+                # Check if the next ingredient (after fragments) should be included
+                # This handles cases like: ["500", "grams", "flour"] where "flour" is a valid food
+                # but should be merged with the preceding fragments
+                if j < len(ingredients):
+                    next_ing = ingredients[j]
+                    # Include the next ingredient if:
+                    # 1. It has a single-word food (no quantity/unit of its own)
+                    # 2. It doesn't have a quantity already set
+                    # 3. It doesn't have a unit already set
+                    # 4. It's not a section title
+                    if (
+                        next_ing.food
+                        and not next_ing.quantity
+                        and not next_ing.unit
+                        and not next_ing.title
+                        and " " not in next_ing.food.strip()
+                    ):
+                        fragment_group.append(next_ing)
+                        j += 1
+
+                # Try to merge the fragment group
+                merged_ingredient = self._build_ingredient_from_fragments(fragment_group)
+                if merged_ingredient:
+                    merged.append(merged_ingredient)
+                    i = j
+                    continue
+
+            # Not a fragment or couldn't merge - keep as is
+            merged.append(current)
+            i += 1
+
+        return merged
+
+    def _build_ingredient_from_fragments(
+        self, fragments: list[OpenAIRecipeIngredient]
+    ) -> OpenAIRecipeIngredient | None:
+        """Build a complete ingredient from a group of fragments.
+
+        Expects fragments in order: [quantity_word, unit_word, food_word, ...]
+        Example: ["500", "grams", "flour"] -> {quantity: 500, unit: "grams", food: "flour"}
+
+        Args:
+            fragments: List of fragmented ingredients to merge.
+
+        Returns:
+            A complete ingredient if fragments can be meaningfully merged, None otherwise.
+        """
+        if not fragments:
+            return None
+
+        # Extract words from all fragments
+        words = []
+        original_texts = []
+        for f in fragments:
+            if f.food:
+                words.append(f.food)
+            if f.original_text:
+                original_texts.append(f.original_text)
+
+        if not words:
+            return None
+
+        # Try to parse the first word as quantity
+        quantity: float | None = None
+        unit: str | None = None
+        food: str | None = None
+        note: str | None = None
+
+        word_idx = 0
+
+        # Try to parse quantity from first word
+        if words:
+            first_word = words[0].lower().strip()
+            try:
+                # Try parsing as float
+                if "." in first_word:
+                    quantity = float(first_word)
+                    word_idx = 1
+                # Try parsing as fraction (e.g., "1/2")
+                elif "/" in first_word:
+                    parts = first_word.split("/")
+                    if len(parts) == 2:
+                        quantity = float(parts[0]) / float(parts[1])
+                        word_idx = 1
+                # Try parsing as integer
+                elif first_word.isdigit():
+                    quantity = float(first_word)
+                    word_idx = 1
+            except (ValueError, ZeroDivisionError):
+                pass
+
+        # Check if next word is a unit
+        if word_idx < len(words):
+            potential_unit = words[word_idx].lower().strip()
+            if potential_unit in self.KNOWN_UNITS:
+                unit = potential_unit
+                word_idx += 1
+
+        # Remaining words become the food (and possibly note)
+        remaining_words = words[word_idx:]
+        if remaining_words:
+            # First word(s) become food
+            # If we have quantity and unit, the first remaining word is food
+            # Otherwise, all remaining words become food
+            food = " ".join(remaining_words)
+
+        # If we couldn't extract meaningful data, return None
+        if not food:
+            return None
+
+        # Build original text from collected fragments
+        original_text = " ".join(original_texts) if original_texts else " ".join(words)
+
+        return OpenAIRecipeIngredient(
+            quantity=quantity,
+            unit=unit,
+            food=food,
+            note=note,
+            original_text=original_text,
+        )
+
     def _convert_recipe(self, openai_recipe: OpenAIRecipe) -> Recipe:
         recipe_ingredients: list[RecipeIngredient] = []
-        for ingredient in openai_recipe.ingredients:
+
+        # First, merge any fragmented ingredients (common in YouTube Shorts)
+        ingredients = self._merge_fragmented_ingredients(openai_recipe.ingredients)
+
+        for ingredient in ingredients:
             if not (ingredient.food or ingredient.original_text or ingredient.title):
                 continue
+
+            # Validate and correct common parsing mistakes
+            ingredient = self._validate_ingredient(ingredient)
 
             food = ingredient.food
             note = ingredient.note or ""
@@ -708,6 +1207,47 @@ class OpenAIRecipeService(RecipeServiceBase):
             recipe = self._convert_recipe(response)
         except Exception as e:
             raise ValueError("Unable to parse recipe from text") from e
+
+        return recipe
+
+    async def build_recipe_from_video_transcript(
+        self, text: str, target_language: str | None = None, correct_grammar: bool = True
+    ) -> Recipe:
+        """Build a recipe from a video transcript (TikTok, YouTube, etc).
+
+        Uses a specialized prompt optimized for spoken video content where
+        ingredients and steps may be mentioned casually.
+
+        Args:
+            text: The video transcript text
+            target_language: Optional language to translate the recipe to
+            correct_grammar: Whether to correct grammatical errors (default: True)
+        """
+        settings = get_app_settings()
+        if not settings.OPENAI_ENABLED:
+            raise ValueError("OpenAI is not available")
+
+        openai_service = OpenAIService()
+        prompt = openai_service.get_prompt("recipes.parse-recipe-video")
+
+        # Build message with optional translation and grammar correction instructions
+        message = text
+        if target_language:
+            message += f"\n\nPlease translate the recipe to {target_language}."
+        if correct_grammar:
+            message += "\n\nPlease correct any grammatical errors in the recipe."
+
+        try:
+            response = await openai_service.get_response(prompt, message, response_schema=OpenAIRecipe)
+            if not response:
+                raise ValueError("Received empty response from OpenAI")
+        except Exception as e:
+            raise Exception(f"Failed to call OpenAI services: {e}") from e
+
+        try:
+            recipe = self._convert_recipe(response)
+        except Exception as e:
+            raise ValueError("Unable to parse recipe from video transcript") from e
 
         return recipe
 

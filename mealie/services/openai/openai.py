@@ -5,7 +5,7 @@ import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from textwrap import dedent
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
@@ -13,10 +13,14 @@ from pydantic import BaseModel, field_validator
 
 from mealie.core import root_logger
 from mealie.core.config import get_app_settings
+from mealie.core.settings.runtime_settings import get_runtime_settings
 from mealie.pkgs import img
 from mealie.schema.openai._base import OpenAIBase
 
 from .._base_service import BaseService
+
+if TYPE_CHECKING:
+    from mealie.schema.openai import RecipeEnhanceRequest, RecipeEnhanceResponse
 
 T = TypeVar("T", bound=OpenAIBase)
 logger = root_logger.get_logger(__name__)
@@ -82,12 +86,21 @@ class OpenAILocalImage(OpenAIImageBase):
 class OpenAIService(BaseService):
     PROMPTS_DIR = Path(os.path.dirname(os.path.abspath(__file__))) / "prompts"
 
-    def __init__(self) -> None:
+    def __init__(self, model: str | None = None) -> None:
         settings = get_app_settings()
         if not settings.OPENAI_ENABLED:
             raise ValueError("OpenAI is not enabled")
 
-        self.model = settings.OPENAI_MODEL
+        # Priority: 1. Explicitly passed model, 2. Runtime settings model, 3. Environment variable
+        if model is None:
+            try:
+                runtime_model = get_runtime_settings().get_llm_model()
+                self.model = runtime_model or settings.OPENAI_MODEL
+            except Exception:
+                self.model = settings.OPENAI_MODEL
+        else:
+            self.model = model
+
         self.workers = settings.OPENAI_WORKERS
         self.send_db_data = settings.OPENAI_SEND_DATABASE_DATA
         self.enable_image_services = settings.OPENAI_ENABLE_IMAGE_SERVICES
@@ -266,8 +279,7 @@ class OpenAIService(BaseService):
                             "role": "user",
                             "content": (
                                 "Your previous response could not be parsed as valid JSON matching "
-                                "the required schema. "
-                                f"Parse error: {e}. "
+                                f"the required schema. Parse error: {e}. "
                                 "Please return a valid JSON response that exactly matches the required schema."
                             ),
                         }
@@ -281,3 +293,52 @@ class OpenAIService(BaseService):
             f"OpenAI Request Failed. Response could not be parsed after {max_retries + 1} attempts: {last_error}. "
             f"Response content (truncated): {truncated_response}"
         ) from last_error
+
+    async def enhance_recipe(
+        self,
+        recipe_data: dict,
+        enhance_request: "RecipeEnhanceRequest",
+    ) -> "RecipeEnhanceResponse | None":
+        """
+        Enhance a recipe based on the provided request parameters.
+
+        Supports:
+        - Portion scaling
+        - Dietary substitutions
+        - Unit conversion
+        - Allergy accommodations
+        """
+        from mealie.schema.openai import RecipeEnhanceResponse
+
+        prompt = self.get_prompt("recipes.enhance-recipe")
+
+        # Build the enhancement request message
+        request_parts = []
+        if enhance_request.target_servings:
+            request_parts.append(f"Scale the recipe to {enhance_request.target_servings} servings.")
+        if enhance_request.dietary_restrictions:
+            restrictions = ", ".join(enhance_request.dietary_restrictions)
+            request_parts.append(f"Make the recipe suitable for: {restrictions}.")
+        if enhance_request.target_units:
+            request_parts.append(f"Convert all measurements to {enhance_request.target_units} units.")
+        if enhance_request.allergies:
+            allergies = ", ".join(enhance_request.allergies)
+            request_parts.append(f"Avoid these allergens: {allergies}.")
+        if enhance_request.optimize_for:
+            request_parts.append(f"Optimize the recipe for: {enhance_request.optimize_for}.")
+
+        message = f"""
+Enhancement Request:
+{chr(10).join(f"- {p}" for p in request_parts)}
+
+Original Recipe:
+{json.dumps(recipe_data, indent=2, ensure_ascii=False)}
+
+Please modify this recipe according to the enhancement request above.
+"""
+
+        return await self.get_response(
+            prompt=prompt,
+            message=message,
+            response_schema=RecipeEnhanceResponse,
+        )

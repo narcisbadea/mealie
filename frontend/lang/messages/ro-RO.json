@@ -709,13 +709,7 @@
     "cover-image": "Imagine copertă",
     "include-linked-recipes": "Include rețetele conectate",
     "include-linked-recipe-ingredients": "Include ingredientele rețetelor conectate",
-    "toggle-recipe": "Comută Rețeta",
-    "ai-tab-tiktok": "TikTok",
-    "ai-tiktok-description": "Lipește URL-ul unui video de gătit de pe TikTok. AI va extrage contextul rețetei din subtitrări și metadate.",
-    "ai-tiktok-url-label": "URL video TikTok",
-    "ai-tiktok-url-hint": "ex. https://www.tiktok.com/@creator/video/...",
-    "ai-tiktok-preview-title": "Previzualizare video",
-    "ai-please-wait-tiktok-processing": "Te rugăm să aștepți, videoclipul TikTok este procesat..."
+    "toggle-recipe": "Comută Rețeta"
   },
   "recipe-finder": {
     "recipe-finder": "Căutător de rețete",

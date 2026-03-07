@@ -58,6 +58,8 @@
       >
         <v-icon> {{ $globals.icons.search }}</v-icon>
       </v-btn>
+      <!-- Notification Bell -->
+      <AppNotificationBell v-if="loggedIn" />
       <v-btn
         v-if="loggedIn"
         :variant="smAndUp ? 'text' : undefined"
@@ -87,9 +89,10 @@
 <script lang="ts">
 import { useLoggedInState } from "~/composables/use-logged-in-state";
 import RecipeDialogSearch from "~/components/Domain/Recipe/RecipeDialogSearch.vue";
+import AppNotificationBell from "~/components/Domain/Layout/AppNotificationBell.vue";
 
 export default defineNuxtComponent({
-  components: { RecipeDialogSearch },
+  components: { RecipeDialogSearch, AppNotificationBell },
   props: {
     menu: {
       type: Boolean,

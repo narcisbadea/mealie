@@ -53,46 +53,55 @@ const topLinks: SidebarLinks = [
     title: i18n.t("sidebar.site-settings"),
     restricted: true,
   },
-
-  // {
-  //   icon: $globals.icons.chart,
-  //   to: "/admin/analytics",
-  //   title: "Analytics",
-  //   restricted: true,
-  // },
   {
     icon: $globals.icons.user,
-    to: "/admin/manage/users",
-    title: i18n.t("user.users"),
+    title: i18n.t("sidebar.users-and-access"),
     restricted: true,
-  },
-  {
-    icon: $globals.icons.household,
-    to: "/admin/manage/households",
-    title: i18n.t("household.households"),
-    restricted: true,
-  },
-  {
-    icon: $globals.icons.group,
-    to: "/admin/manage/groups",
-    title: i18n.t("group.groups"),
-    restricted: true,
+    childrenStartExpanded: false,
+    children: [
+      {
+        icon: $globals.icons.user,
+        to: "/admin/manage/users",
+        title: i18n.t("user.users"),
+        restricted: true,
+      },
+      {
+        icon: $globals.icons.household,
+        to: "/admin/manage/households",
+        title: i18n.t("household.households"),
+        restricted: true,
+      },
+      {
+        icon: $globals.icons.group,
+        to: "/admin/manage/groups",
+        title: i18n.t("group.groups"),
+        restricted: true,
+      },
+    ],
   },
   {
     icon: $globals.icons.database,
-    to: "/admin/backups",
-    title: i18n.t("sidebar.backups"),
+    title: i18n.t("sidebar.system"),
     restricted: true,
+    childrenStartExpanded: false,
+    children: [
+      {
+        icon: $globals.icons.database,
+        to: "/admin/backups",
+        title: i18n.t("sidebar.backups"),
+        restricted: true,
+      },
+      {
+        icon: $globals.icons.wrench,
+        to: "/admin/maintenance",
+        title: i18n.t("sidebar.maintenance"),
+        restricted: true,
+      },
+    ],
   },
 ];
 
 const developerLinks: SidebarLinks = [
-  {
-    icon: $globals.icons.wrench,
-    to: "/admin/maintenance",
-    title: i18n.t("sidebar.maintenance"),
-    restricted: true,
-  },
   {
     icon: $globals.icons.robot,
     title: i18n.t("recipe.debug"),

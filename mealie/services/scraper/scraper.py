@@ -12,7 +12,8 @@ from mealie.schema.recipe import Recipe
 from mealie.services.recipe.recipe_data_service import RecipeDataService
 from mealie.services.scraper.scraped_extras import ScrapedExtras
 
-from .recipe_scraper import RecipeScraper, RecipeScraperOpenAIDirect
+from .recipe_scraper import RecipeScraper
+from .scraper_strategies import ABCScraperStrategy, RecipeScraperOpenAIDirect
 
 
 class ParserErrors(StrEnum):
@@ -34,7 +35,7 @@ async def create_from_html(
     Returns:
         Recipe: Recipe Object
     """
-    scrapers = [RecipeScraperOpenAIDirect] if use_openai else None
+    scrapers: list[type[ABCScraperStrategy]] | None = [RecipeScraperOpenAIDirect] if use_openai else None
     scraper = RecipeScraper(translator, scrapers=scrapers)
 
     if not html:

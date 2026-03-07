@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from urllib import parse as urlparse
 
-from pydantic import BaseModel, PostgresDsn
+from pydantic import BaseModel, PostgresDsn, PrivateAttr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,10 +15,25 @@ class AbstractDBProvider(ABC):
     @abstractmethod
     def db_url_public(self) -> str: ...
 
+    @property
+    @abstractmethod
+    def data_dir(self) -> Path: ...
+
 
 class SQLiteProvider(AbstractDBProvider, BaseModel):
-    data_dir: Path
     prefix: str = ""
+
+    _data_dir: Path = PrivateAttr(default_factory=lambda: Path("/app/data"))
+
+    model_config = SettingsConfigDict(arbitrary_types_allowed=True)
+
+    def __init__(self, data_dir: Path = Path("/app/data"), **data):
+        super().__init__(**data)
+        self._data_dir = data_dir
+
+    @property
+    def data_dir(self) -> Path:
+        return self._data_dir
 
     @property
     def db_path(self):
@@ -41,7 +56,20 @@ class PostgresProvider(AbstractDBProvider, BaseSettings):
     POSTGRES_DB: str = "mealie"
     POSTGRES_URL_OVERRIDE: str | None = None
 
+    _data_dir: Path | None = None
+
     model_config = SettingsConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    def set_data_dir(self, data_dir: Path) -> None:
+        """Set the data directory for file storage."""
+        self._data_dir = data_dir
+
+    @property
+    def data_dir(self) -> Path:
+        """Return the data directory for file storage."""
+        if self._data_dir is None:
+            return Path("/app/data")
+        return self._data_dir
 
     def _parse_override_url(self, url: str) -> str:
         if not url.startswith("postgresql://"):
@@ -80,6 +108,8 @@ class PostgresProvider(AbstractDBProvider, BaseSettings):
 
 def db_provider_factory(provider_name: str, data_dir: Path, env_file: Path, env_encoding="utf-8") -> AbstractDBProvider:
     if provider_name == "postgres":
-        return PostgresProvider(_env_file=env_file, _env_file_encoding=env_encoding)
+        provider = PostgresProvider(_env_file=env_file, _env_file_encoding=env_encoding)
+        provider.set_data_dir(data_dir)
+        return provider
     else:
         return SQLiteProvider(data_dir=data_dir)
